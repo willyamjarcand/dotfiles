@@ -5,7 +5,7 @@ Behold the magnum opus of my coding journey, the celestial ark carrying my most 
 This is willyam's personal dotfiles. Should work in 
 1. Macos
 2. Spin
-3. Ubuntu (in progress)
+3. Ubuntu
 
 # Installation
 
