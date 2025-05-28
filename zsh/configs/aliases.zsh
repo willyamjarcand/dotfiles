@@ -9,4 +9,6 @@ start_nvim() {
 alias vi='start_nvim'
 
 ai() {
+    OPENAI_API_BASE=https://llm.w10e.com/api \
+    aider --model openai/bedrock-claude-3.7-sonnet --api-key openai=$OPENAI_API_KEY
 }
