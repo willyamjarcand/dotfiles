@@ -7,7 +7,7 @@ This is willyam's personal dotfiles. Should work in
 2. Spin
 3. Ubuntu
 
-# Installation
+## Installation
 
 1. `cd ~`
 2. `git clone https://github.com/willyamacaroni/dotfiles.git`
