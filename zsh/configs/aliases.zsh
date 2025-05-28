@@ -9,6 +9,4 @@ start_nvim() {
 alias vi='start_nvim'
 
 ai() {
-    local socket_path="/tmp/nvim-$(basename "$PWD")"
-    dev claude -- "my vim/neovim is listening at the socket $socket_path"
 }
