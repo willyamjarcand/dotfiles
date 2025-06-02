@@ -33,3 +33,5 @@
   co = checkout
 [maintenance]
 	repo = /Users/willyamarcand/world/trees/root/src
+[url "ssh://git@github.com/"]
+	insteadOf = https://github.com/

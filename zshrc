@@ -81,3 +81,10 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 export KUBECONFIG=${KUBECONFIG:+$KUBECONFIG:}/Users/willyamarcand/.kube/config:/Users/willyamarcand/.kube/config.shopify.cloudplatform
 
 [[ -f /opt/dev/sh/chruby/chruby.sh ]] && { type chruby >/dev/null 2>&1 || chruby () { source /opt/dev/sh/chruby/chruby.sh; chruby "$@"; } }
+source /Users/willyam.arcand/.config/wealthsimple/rbenv/config.zsh
+source /Users/willyam.arcand/.config/wealthsimple/direnv/config.zsh
+source /Users/willyam.arcand/.config/wealthsimple/nvm/config.zsh
+eval "$(mise activate zsh)"
+source /opt/homebrew/opt/chruby/share/chruby/chruby.sh
+source /opt/homebrew/opt/chruby/share/chruby/auto.sh
+chruby ruby-3.2.2
