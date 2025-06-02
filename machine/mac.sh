@@ -26,6 +26,8 @@ brew "lolcat"
 brew "tmux"
 brew "ripgrep"
 brew "jordanbaird-ice"
+brew "chruby"
+brew "ruby-install"
 cask "iterm2"
 cask "rectangle"
 cask "bartender"
@@ -61,6 +63,13 @@ ln -s $HOME/dotfiles/zsh/themes/dracula/dracula.zsh-theme $HOME/.oh-my-zsh/theme
 cp -a fonts/RobotoMono ~/Library/Fonts/
 cp fonts/Inconsolata\ Nerd\ Font\ Complete\ Mono.otf ~/Library/Fonts/
 cp fonts/Hack/* ~/Library/Fonts/
+
+# Setup chruby configuration in shell profile
+if ! grep -q "source /opt/homebrew/opt/chruby/share/chruby/chruby.sh" ~/.zshrc; then
+  echo 'source /opt/homebrew/opt/chruby/share/chruby/chruby.sh' >> ~/.zshrc
+  echo 'source /opt/homebrew/opt/chruby/share/chruby/auto.sh' >> ~/.zshrc
+  echo 'chruby ruby-3.2.2' >> ~/.zshrc  # Change version as needed
+fi
 
 # Setup expected defaults
 $HOME/dotfiles/machine/mac/defaults.sh
