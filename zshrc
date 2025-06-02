@@ -85,5 +85,6 @@ source /Users/willyam.arcand/.config/wealthsimple/rbenv/config.zsh
 source /Users/willyam.arcand/.config/wealthsimple/direnv/config.zsh
 source /Users/willyam.arcand/.config/wealthsimple/nvm/config.zsh
 eval "$(mise activate zsh)"
+eval "$(ws hook zsh)"
 source /opt/homebrew/opt/chruby/share/chruby/chruby.sh
 source /opt/homebrew/opt/chruby/share/chruby/auto.sh
