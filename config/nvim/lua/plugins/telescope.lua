@@ -1,6 +1,6 @@
 return {
   {
-    "telescope.nvim",
+    "nvim-telescope/telescope.nvim",
     dependencies = {
       {
         "nvim-telescope/telescope-fzf-native.nvim",
@@ -26,10 +26,12 @@ return {
 
       opts.pickers = {
         diagnostics = {
-          theme = "ivy",
           initial_mode = "normal",
+          layout_strategy = "vertical",
           layout_config = {
             preview_cutoff = 9999,
+            height = 0.95,
+            width = 0.95,
           },
         },
       }

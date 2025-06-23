@@ -77,6 +77,8 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 
 [ -f /opt/dev/dev.sh ] && source /opt/dev/dev.sh
 
+source ~/.config/wealthsimple/env.secrets
+
 # Claude Code
 export AWS_REGION='us-east-1'
 export ANTHROPIC_MODEL='us.anthropic.claude-sonnet-4-20250514-v1:0'
