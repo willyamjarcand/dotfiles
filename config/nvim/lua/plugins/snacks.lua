@@ -14,6 +14,11 @@ return {
             ["<C-p>"] = { "list_up", mode = { "i", "n" } },
           },
         },
+        list = {
+          keys = {
+            ["<C-e>"] = { "toggle_maximize", mode = { "i", "n" } },
+          },
+        },
       },
     },
   },
