@@ -22,4 +22,23 @@ return {
       },
     },
   },
+  keys = {
+    {
+      "<leader>sg",
+      function()
+        Snacks.picker.grep({
+          args = { "--glob", "!*_spec.rb", "--glob", "!*_task.rb" },
+        })
+      end,
+      desc = "Grep (exclude _spec.rb and _task.rb)",
+    },
+  },
+  config = function(_, opts)
+    require("snacks").setup(opts)
+    
+    -- Add custom Grep command
+    vim.api.nvim_create_user_command("Grep", function()
+      require("snacks").picker.grep()
+    end, { desc = "Open grep picker" })
+  end,
 }
