@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.google.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(rspec:*)"
+    ],
+    "deny": []
+  }
+}
