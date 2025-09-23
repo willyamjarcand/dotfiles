@@ -25,7 +25,7 @@
   colorMoved = zebra
 [user]
 	name = Willyam Arcand
-	email = willyam.arcand@wealthsimple.com
+	email = willyam.arcand@gmail.com
 [alias]
   st = status
   ci = commit
@@ -33,5 +33,3 @@
   co = checkout
 [maintenance]
 	repo = /Users/willyamarcand/world/trees/root/src
-[url "ssh://git@github.com/"]
-	insteadOf = https://github.com/
