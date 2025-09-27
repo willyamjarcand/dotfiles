@@ -1,0 +1,7 @@
+[include]
+  path = /Users/willyamarcand/.config/dev/gitconfig
+[user]
+  name = Willyam Arcand
+  email = willyam.arcand@wealthsimple.com
+[url "ssh://git@github.com/"]
+  insteadOf = https://github.com/
