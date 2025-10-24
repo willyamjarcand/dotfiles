@@ -1,0 +1,286 @@
+#!/bin/bash
+
+# git-restack: Graphite-style restack functionality using pure git commands
+# Usage: git restack [branch_pattern]
+
+set -euo pipefail
+
+# Configuration
+MAIN_BRANCH="${MAIN_BRANCH:-main}"
+BRANCH_PATTERN="${1:-}"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+log() {
+    echo -e "${BLUE}[restack]${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}[restack]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[restack]${NC} $1" >&2
+}
+
+success() {
+    echo -e "${GREEN}[restack]${NC} $1"
+}
+
+# Check if we're in a git repository
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    error "Not in a git repository"
+    exit 1
+fi
+
+# Store current branch
+current_branch=$(git branch --show-current)
+
+# Function to get all local branches except main/master
+get_branches() {
+    if [[ -n "$BRANCH_PATTERN" ]]; then
+        git branch --format='%(refname:short)' | grep -E "$BRANCH_PATTERN" | grep -v "^${MAIN_BRANCH}$" || true
+    else
+        git branch --format='%(refname:short)' | grep -v "^${MAIN_BRANCH}$"
+    fi
+}
+
+# Function to get the merge base (common ancestor) of two branches
+get_merge_base() {
+    local branch1="$1"
+    local branch2="$2"
+    git merge-base "$branch1" "$branch2"
+}
+
+# Function to check if branch A is based on branch B
+is_based_on() {
+    local branch="$1"
+    local base="$2"
+    local merge_base
+    merge_base=$(get_merge_base "$branch" "$base")
+    local base_commit
+    base_commit=$(git rev-parse "$base")
+    [[ "$merge_base" == "$base_commit" ]]
+}
+
+# Function to find the parent branch for a given branch
+find_parent_branch() {
+    local branch="$1"
+    local branches
+    branches=$(get_branches)
+    
+    # Check if directly based on main
+    if is_based_on "$branch" "$MAIN_BRANCH"; then
+        echo "$MAIN_BRANCH"
+        return
+    fi
+    
+    # Find the most recent common ancestor among other branches
+    local best_parent=""
+    local best_distance=999999
+    
+    while IFS= read -r candidate; do
+        [[ "$candidate" == "$branch" ]] && continue
+        [[ -z "$candidate" ]] && continue
+        
+        if is_based_on "$branch" "$candidate"; then
+            # Calculate distance (number of commits)
+            local distance
+            distance=$(git rev-list --count "$candidate..$branch")
+            if [[ $distance -lt $best_distance ]]; then
+                best_distance=$distance
+                best_parent=$candidate
+            fi
+        fi
+    done <<< "$branches"
+    
+    echo "${best_parent:-$MAIN_BRANCH}"
+}
+
+# Function to restack a single branch onto its parent
+restack_branch() {
+    local branch="$1"
+    local parent="$2"
+    
+    log "Restacking $branch onto $parent"
+    
+    # Check if branch needs restacking
+    if is_based_on "$branch" "$parent"; then
+        success "$branch is already based on $parent"
+        return 0
+    fi
+    
+    # Checkout the branch to restack
+    git checkout "$branch"
+    
+    # Attempt to rebase
+    if git rebase "$parent"; then
+        success "Successfully restacked $branch onto $parent"
+        return 0
+    else
+        error "Conflict restacking $branch onto $parent"
+        echo
+        echo "To fix and continue:"
+        echo "(1) resolve the listed merge conflicts"
+        echo "(2) mark them as resolved with: git add ."
+        echo "(3) continue with: git rebase --continue"
+        echo "(4) re-run: git restack"
+        return 1
+    fi
+}
+
+# Main restack logic
+main() {
+    log "Starting restack operation"
+    
+    # Ensure we're on main branch and up to date
+    git checkout "$MAIN_BRANCH"
+    
+    # Get all branches to restack
+    local branches
+    branches=$(get_branches)
+    
+    if [[ -z "$branches" ]]; then
+        warn "No branches found to restack"
+        return 0
+    fi
+    
+    # Build dependency graph (using bash 3 compatible approach)
+    local parents_keys=()
+    local parents_values=()
+    local sorted_branches=()
+    
+    # Helper functions for associative array simulation
+    get_parent() {
+        local branch="$1"
+        for i in "${!parents_keys[@]}"; do
+            if [[ "${parents_keys[$i]}" == "$branch" ]]; then
+                echo "${parents_values[$i]}"
+                return
+            fi
+        done
+    }
+    
+    set_parent() {
+        local branch="$1"
+        local parent="$2"
+        parents_keys+=("$branch")
+        parents_values+=("$parent")
+    }
+    
+    # First pass: identify parents
+    while IFS= read -r branch; do
+        [[ -z "$branch" ]] && continue
+        local parent
+        parent=$(find_parent_branch "$branch")
+        set_parent "$branch" "$parent"
+        log "Found parent for $branch: $parent"
+    done <<< "$branches"
+    
+    # Topological sort to determine restack order
+    local visited=()
+    local temp_visited=()
+    
+    topological_visit() {
+        local branch="$1"
+        
+        # Check for cycles
+        if [[ ${#temp_visited[@]} -gt 0 ]]; then
+            for tv in "${temp_visited[@]}"; do
+                if [[ "$tv" == "$branch" ]]; then
+                    error "Circular dependency detected involving $branch"
+                    return 1
+                fi
+            done
+        fi
+        
+        # Check if already visited
+        if [[ ${#visited[@]} -gt 0 ]]; then
+            for v in "${visited[@]}"; do
+                if [[ "$v" == "$branch" ]]; then
+                    return 0
+                fi
+            done
+        fi
+        
+        temp_visited+=("$branch")
+        
+        # Visit dependencies first (branches that depend on this branch)
+        while IFS= read -r dep_branch; do
+            [[ -z "$dep_branch" ]] && continue
+            local dep_parent
+            dep_parent=$(get_parent "$dep_branch")
+            if [[ "$dep_parent" == "$branch" ]]; then
+                topological_visit "$dep_branch"
+            fi
+        done <<< "$branches"
+        
+        # Remove from temp and add to visited
+        if [[ ${#temp_visited[@]} -gt 0 ]]; then
+            local new_temp=()
+            for item in "${temp_visited[@]}"; do
+                [[ "$item" != "$branch" ]] && new_temp+=("$item")
+            done
+            if [[ ${#new_temp[@]} -gt 0 ]]; then
+                temp_visited=("${new_temp[@]}")
+            else
+                temp_visited=()
+            fi
+        fi
+        visited+=("$branch")
+        if [[ ${#sorted_branches[@]} -gt 0 ]]; then
+            sorted_branches=("$branch" "${sorted_branches[@]}")
+        else
+            sorted_branches=("$branch")
+        fi
+    }
+    
+    # Sort all branches
+    while IFS= read -r branch; do
+        [[ -z "$branch" ]] && continue
+        topological_visit "$branch"
+    done <<< "$branches"
+    
+    # Restack in sorted order
+    if [[ ${#sorted_branches[@]} -gt 0 ]]; then
+        for branch in "${sorted_branches[@]}"; do
+            local parent
+            parent=$(get_parent "$branch")
+            restack_branch "$branch" "$parent" || {
+                error "Restack failed on $branch"
+                return 1
+            }
+        done
+    fi
+    
+    # Return to original branch
+    if [[ -n "$current_branch" && "$current_branch" != "$MAIN_BRANCH" ]]; then
+        git checkout "$current_branch"
+    fi
+    
+    success "Restack completed successfully"
+}
+
+# Handle script arguments
+case "${1:-}" in
+    --help|-h)
+        echo "Usage: git restack [branch_pattern]"
+        echo
+        echo "Restack branches to ensure they're based on their logical parents."
+        echo
+        echo "Arguments:"
+        echo "  branch_pattern    Optional regex pattern to filter branches"
+        echo
+        echo "Environment variables:"
+        echo "  MAIN_BRANCH      Main branch name (default: main)"
+        exit 0
+        ;;
+    *)
+        main "$@"
+        ;;
+esac

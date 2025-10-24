@@ -1,0 +1,178 @@
+#!/bin/bash
+
+# Script to run RSpec tests for all modified files in the current git branch
+# Usage: rspec-modified [options]
+# Options:
+#   -h, --help     Show this help message
+#   -v, --verbose  Show verbose output
+#   -b, --branch   Compare against specific branch (default: main branch)
+
+set -e
+
+VERBOSE=false
+COMPARE_BRANCH=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h|--help)
+      echo "Usage: rspec-modified [options]"
+      echo ""
+      echo "Run RSpec tests for all modified files in the current git branch"
+      echo ""
+      echo "Options:"
+      echo "  -h, --help     Show this help message"
+      echo "  -v, --verbose  Show verbose output"
+      echo "  -b, --branch   Compare against specific branch (default: main branch)"
+      echo ""
+      echo "Examples:"
+      echo "  rspec-modified                    # Run tests for files modified vs main"
+      echo "  rspec-modified -v                 # Verbose output"
+      echo "  rspec-modified -b develop         # Compare against develop branch"
+      exit 0
+      ;;
+    -v|--verbose)
+      VERBOSE=true
+      shift
+      ;;
+    -b|--branch)
+      COMPARE_BRANCH="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Use -h or --help for usage information"
+      exit 1
+      ;;
+  esac
+done
+
+# Check if we're in a git repository
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    echo "❌ Not in a git repository"
+    exit 1
+fi
+
+# Check if bundle command exists
+if ! command -v bundle &> /dev/null; then
+    echo "❌ Bundler not found. Make sure you're in a Ruby project with Bundler installed."
+    exit 1
+fi
+
+# Check if RSpec is available
+if ! bundle exec rspec --version &> /dev/null; then
+    echo "❌ RSpec not found in bundle. Make sure RSpec is installed."
+    exit 1
+fi
+
+[$VERBOSE == true] && echo "🔍 Finding modified files in current branch..."
+
+# Get the main branch name if not specified
+if [ -z "$COMPARE_BRANCH" ]; then
+    # Try to find main branch (could be 'main', 'master', 'develop', etc.)
+    if git show-ref --verify --quiet refs/remotes/origin/main; then
+        COMPARE_BRANCH="main"
+    elif git show-ref --verify --quiet refs/remotes/origin/master; then
+        COMPARE_BRANCH="master"
+    else
+        # Fallback to the default branch
+        COMPARE_BRANCH=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+    fi
+fi
+
+[$VERBOSE == true] && echo "📊 Comparing against branch: origin/$COMPARE_BRANCH"
+
+# Get all modified Ruby files in the current branch compared to main
+MODIFIED_FILES=$(git diff --name-only origin/$COMPARE_BRANCH...HEAD | grep '\.rb$' || true)
+
+if [ -z "$MODIFIED_FILES" ]; then
+    echo "❌ No modified Ruby files found in this branch"
+    exit 0
+fi
+
+if [ $VERBOSE == true ]; then
+    echo "📝 Modified files:"
+    echo "$MODIFIED_FILES"
+    echo ""
+fi
+
+# Convert modified files to their corresponding spec files
+SPEC_FILES=""
+MISSING_SPECS=""
+
+for file in $MODIFIED_FILES; do
+    # Skip if file doesn't exist (might have been deleted)
+    if [ ! -f "$file" ]; then
+        [$VERBOSE == true] && echo "⚠️  Skipping deleted file: $file"
+        continue
+    fi
+    
+    # Skip spec files themselves (we'll run them directly if they're modified)
+    if [[ "$file" == *"_spec.rb" ]]; then
+        if [ -f "$file" ]; then
+            SPEC_FILES="$SPEC_FILES $file"
+            [$VERBOSE == true] && echo "✅ Found spec file: $file"
+        fi
+        continue
+    fi
+    
+    # Convert source file to spec file path
+    # Handle different patterns based on project structure
+    
+    if [[ "$file" == components/* ]]; then
+        # Handle component files: components/foo/app/models/bar.rb -> components/foo/spec/models/bar_spec.rb
+        COMPONENT_SPEC=$(echo "$file" | sed 's|/app/|/spec/|' | sed 's|\.rb$|_spec.rb|')
+        if [ -f "$COMPONENT_SPEC" ]; then
+            SPEC_FILES="$SPEC_FILES $COMPONENT_SPEC"
+            [$VERBOSE == true] && echo "✅ Found component spec: $COMPONENT_SPEC"
+        else
+            MISSING_SPECS="$MISSING_SPECS\n  $file -> $COMPONENT_SPEC"
+        fi
+    elif [[ "$file" == app/* ]]; then
+        # Handle main app files: app/models/foo.rb -> spec/models/foo_spec.rb
+        APP_SPEC=$(echo "$file" | sed 's|^app/|spec/|' | sed 's|\.rb$|_spec.rb|')
+        if [ -f "$APP_SPEC" ]; then
+            SPEC_FILES="$SPEC_FILES $APP_SPEC"
+            [$VERBOSE == true] && echo "✅ Found app spec: $APP_SPEC"
+        else
+            MISSING_SPECS="$MISSING_SPECS\n  $file -> $APP_SPEC"
+        fi
+    elif [[ "$file" == lib/* ]]; then
+        # Handle lib files: lib/foo.rb -> spec/lib/foo_spec.rb
+        LIB_SPEC=$(echo "$file" | sed 's|^lib/|spec/lib/|' | sed 's|\.rb$|_spec.rb|')
+        if [ -f "$LIB_SPEC" ]; then
+            SPEC_FILES="$SPEC_FILES $LIB_SPEC"
+            [$VERBOSE == true] && echo "✅ Found lib spec: $LIB_SPEC"
+        else
+            MISSING_SPECS="$MISSING_SPECS\n  $file -> $LIB_SPEC"
+        fi
+    else
+        [$VERBOSE == true] && echo "⚠️  Unknown file pattern: $file"
+        MISSING_SPECS="$MISSING_SPECS\n  $file -> (unknown pattern)"
+    fi
+done
+
+# Show missing specs if verbose or if no specs found
+if [ -n "$MISSING_SPECS" ] && ([ $VERBOSE == true ] || [ -z "$SPEC_FILES" ]); then
+    echo "⚠️  No spec files found for:"
+    echo -e "$MISSING_SPECS"
+    echo ""
+fi
+
+if [ -z "$SPEC_FILES" ]; then
+    echo "❌ No corresponding spec files found for modified files"
+    exit 0
+fi
+
+if [ $VERBOSE == true ]; then
+    echo "🧪 Running RSpec for the following spec files:"
+    echo "$SPEC_FILES"
+    echo ""
+fi
+
+# Run RSpec with the found spec files
+echo "🚀 Executing: bundle exec rspec$SPEC_FILES"
+bundle exec rspec $SPEC_FILES
+
+echo ""
+echo "✅ Tests completed!"
