@@ -221,6 +221,8 @@
 	</dict>
 	<key>Default Bookmark Guid</key>
 	<string>A78C6D34-DCFD-4E70-ABDF-615011A77869</string>
+	<key>Default Browser Profile Guid</key>
+	<string>DC3CD5FF-16F2-41DA-AE63-8C8F0E26E5BA</string>
 	<key>HapticFeedbackForEsc</key>
 	<false/>
 	<key>HotkeyMigratedFromSingleToMulti</key>
@@ -859,9 +861,34 @@
 			<key>Working Directory</key>
 			<string>/Users/galeshafer</string>
 		</dict>
+		<dict>
+			<key>Command</key>
+			<string>/bin/bash --login</string>
+			<key>Custom Command</key>
+			<string>Browser</string>
+			<key>Default Bookmark</key>
+			<string>No</string>
+			<key>Guid</key>
+			<string>64E24C84-B9E1-48CB-ADA7-11D344B76C2B</string>
+			<key>Jobs to Ignore</key>
+			<array>
+				<string>rlogin</string>
+				<string>ssh</string>
+				<string>slogin</string>
+				<string>telnet</string>
+			</array>
+			<key>Name</key>
+			<string>Web Browser</string>
+			<key>Prompt Before Closing 2</key>
+			<false/>
+			<key>Tags</key>
+			<array/>
+		</dict>
 	</array>
 	<key>OptionClickMovesCursor</key>
 	<false/>
+	<key>PasteTabToStringTabStopSize</key>
+	<integer>4</integer>
 	<key>PointerActions</key>
 	<dict>
 		<key>Button,1,1,,</key>
@@ -905,6 +932,8 @@
 	<false/>
 	<key>VisualIndicatorForEsc</key>
 	<false/>
+	<key>WebKitAdblockEnabled</key>
+	<true/>
 	<key>findMode_iTerm</key>
 	<integer>0</integer>
 </dict>
