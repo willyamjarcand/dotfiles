@@ -82,3 +82,6 @@ if hostname | grep -i Wealthsimple &>/dev/null; then
   source ~/.config/wealthsimple/env.secrets
   _load_settings "$HOME/.zsh/configs/wealthsimple"
 fi
+
+
+eval "$(~/.local/bin/mise activate zsh)"
