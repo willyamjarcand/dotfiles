@@ -30,15 +30,18 @@ return {
           args = { "--glob", "!*_spec.rb", "--glob", "!*_task.rb" },
         })
       end,
-      desc = "Grep (exclude _spec.rb and _task.rb)",
+      desc = "Grep (exclude spec/task files)",
+    },
+    {
+      "<leader>fw",
+      function()
+        local word = vim.fn.expand("<cword>")
+        Snacks.picker.grep({
+          search = word,
+          args = { "--glob", "!*_spec.rb", "--glob", "!*_task.rb" },
+        })
+      end,
+      desc = "Grep word under cursor (exclude spec/task)",
     },
   },
-  config = function(_, opts)
-    require("snacks").setup(opts)
-    
-    -- Add custom Grep command
-    vim.api.nvim_create_user_command("Grep", function()
-      require("snacks").picker.grep()
-    end, { desc = "Open grep picker" })
-  end,
 }
