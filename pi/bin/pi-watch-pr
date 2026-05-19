@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# pi-watch-pr — long-running poll loop that ticks the watch-pr skill until done.
+#
+# Invoked by the spawn-watcher extension inside a fresh tmux pane. Reads config
+# from environment variables (set by the extension via `tmux new-window -e`).
+#
+# Required env:
+#   PR             — PR number
+#   CTX_FILE       — absolute path to the kickoff context file
+#
+# Optional env (with defaults):
+#   EFFORT         — thinking level (default: xhigh)
+#   MODEL          — model id; empty means inherit pi's default
+#   POLL_SECONDS   — seconds between ticks (default: 300)
+#   REPO_ROOT      — directory to chdir into (default: PWD)
+#
+# Exits when the watcher writes ~/.pi/agent/watcher-state/pr-<PR>.done.
+
+set -euo pipefail
+
+: "${PR:?PR env var required}"
+: "${CTX_FILE:?CTX_FILE env var required}"
+
+EFFORT="${EFFORT:-xhigh}"
+MODEL="${MODEL:-}"
+POLL_SECONDS="${POLL_SECONDS:-300}"
+REPO_ROOT="${REPO_ROOT:-$PWD}"
+
+cd "$REPO_ROOT"
+
+STATE_DIR="$HOME/.pi/agent/watcher-state"
+SESSION_DIR="$HOME/.pi/agent/watcher-sessions"
+mkdir -p "$STATE_DIR" "$SESSION_DIR"
+
+# Deterministic session file scoped to repo + PR so re-running /watch-pr for
+# the same PR resumes the same conversation instead of forking.
+REPO_SLUG="$(git config --get remote.origin.url 2>/dev/null \
+  | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?$#\1#' \
+  | tr '/' '_')"
+SESSION_FILE="$SESSION_DIR/${REPO_SLUG:-unknown}-pr-$PR.jsonl"
+DONE_FILE="$STATE_DIR/pr-$PR.done"
+
+# Clear stale done sentinel from a previous run for the same PR
+rm -f "$DONE_FILE"
+
+MODEL_ARGS=()
+if [[ -n "$MODEL" ]]; then
+  MODEL_ARGS=(--model "$MODEL")
+fi
+
+PI_ARGS=(
+  --session "$SESSION_FILE"
+  --thinking "$EFFORT"
+  "${MODEL_ARGS[@]}"
+)
+
+banner() {
+  printf '\n\033[1;36m▸ %s\033[0m\n' "$1"
+}
+
+trap 'banner "watch-pr received signal — running stop phase"; \
+  pi "${PI_ARGS[@]}" -p "/skill:watch-pr stop $PR" || true; exit 130' INT TERM
+
+banner "watch-pr #$PR starting (effort=$EFFORT poll=${POLL_SECONDS}s)"
+banner "session:  $SESSION_FILE"
+banner "context:  $CTX_FILE"
+banner "notes:    $REPO_ROOT/PR-NOTES-$PR.md"
+echo
+
+# Iteration 0: kickoff with context attached.
+pi "${PI_ARGS[@]}" -p "@$CTX_FILE" "/skill:watch-pr init $PR"
+
+# Iterations 1..N: tick until the skill writes the done sentinel.
+TICK=1
+while [[ ! -f "$DONE_FILE" ]]; do
+  banner "sleeping ${POLL_SECONDS}s before tick $TICK"
+  sleep "$POLL_SECONDS"
+  banner "tick $TICK"
+  pi "${PI_ARGS[@]}" -p "/skill:watch-pr tick $PR" || {
+    echo "tick $TICK failed; will retry next iteration"
+  }
+  TICK=$((TICK + 1))
+done
+
+banner "watch-pr #$PR done — see $REPO_ROOT/PR-NOTES-$PR.md"
+cat "$DONE_FILE" 2>/dev/null || true
+echo
+echo "Press any key to close this pane..."
+read -r -n 1

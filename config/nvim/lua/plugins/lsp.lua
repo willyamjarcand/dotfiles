@@ -22,6 +22,7 @@ return {
         ruby_lsp = {},
         sorbet = {
           root_dir = function(fname)
+            if type(fname) ~= "string" then return nil end
             local util = require("lspconfig.util")
             local root = util.root_pattern("sorbet/config")(fname) or util.find_git_ancestor(fname)
 

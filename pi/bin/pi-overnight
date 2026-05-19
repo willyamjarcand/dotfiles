@@ -1,0 +1,329 @@
+#!/usr/bin/env bash
+# pi-overnight — run an autonomous game-dev team in a worktree until 1 feature ships
+# (or until a deadline / iteration cap / STOP file is hit).
+#
+# Usage:
+#   pi-overnight <repo-path> [--max-iters N] [--until HH:MM] [--max-hours N]
+#                            [--mvp | --no-mvp] [--worktree PATH] [--dry-run]
+#
+# Defaults:
+#   --max-iters     50
+#   --max-hours     8
+#   --until         09:00 (local time, next occurrence)
+#   --mvp           off (with --mvp: stop after first feature ships)
+#                        without: keep shipping features until deadline/iter/STOP/DONE
+#
+# The script:
+#   1. Creates a worktree at <repo>-overnight-YYYY-MM-DD on branch overnight/YYYY-MM-DD
+#   2. Sets up .overnight/ scaffolding (STATE.md, NIGHT_LOG.md)
+#   3. Loops, calling `pi -p` once per tick with the overnight-team skill
+#   4. Exits when DONE / STOP / deadline / iteration cap is hit
+#   5. Leaves the worktree intact for the human to inspect in the morning.
+
+set -euo pipefail
+
+# ---------- arg parsing ----------
+
+REPO=""
+MAX_ITERS=50
+MAX_HOURS=8
+UNTIL_HHMM="09:00"
+MVP=0
+WORKTREE=""
+DRY_RUN=0
+
+usage() {
+  sed -n '2,20p' "$0"
+  exit "${1:-0}"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --max-iters)   MAX_ITERS="$2"; shift 2 ;;
+    --max-hours)   MAX_HOURS="$2"; shift 2 ;;
+    --until)       UNTIL_HHMM="$2"; shift 2 ;;
+    --mvp)         MVP=1; shift ;;
+    --no-mvp)      MVP=0; shift ;;
+    --worktree)    WORKTREE="$2"; shift 2 ;;
+    --dry-run)     DRY_RUN=1; shift ;;
+    -h|--help)     usage 0 ;;
+    -*)            echo "unknown flag: $1" >&2; usage 1 ;;
+    *)
+      if [[ -z "$REPO" ]]; then
+        REPO="$1"; shift
+      else
+        echo "unexpected arg: $1" >&2; usage 1
+      fi
+      ;;
+  esac
+done
+
+if [[ -z "$REPO" ]]; then
+  echo "error: repo path is required" >&2
+  usage 1
+fi
+
+if [[ ! -d "$REPO/.git" ]]; then
+  echo "error: $REPO is not a git repository" >&2
+  exit 1
+fi
+
+REPO="$(cd "$REPO" && pwd)"  # absolutize
+
+# ---------- compute deadline ----------
+
+DATE_TAG="$(date +%Y-%m-%d)"
+START_TS=$(date +%s)
+MAX_HOURS_TS=$(( START_TS + MAX_HOURS * 3600 ))
+
+# Compute UNTIL timestamp (next occurrence of HH:MM, local time)
+until_today_ts=$(date -j -f "%Y-%m-%d %H:%M" "$(date +%Y-%m-%d) $UNTIL_HHMM" +%s 2>/dev/null \
+              || date -d "today $UNTIL_HHMM" +%s 2>/dev/null \
+              || echo "")
+if [[ -z "$until_today_ts" ]]; then
+  echo "error: could not parse --until value '$UNTIL_HHMM'" >&2
+  exit 1
+fi
+if (( until_today_ts <= START_TS )); then
+  # already past today's HH:MM → use tomorrow
+  until_today_ts=$(( until_today_ts + 86400 ))
+fi
+
+DEADLINE_TS=$(( MAX_HOURS_TS < until_today_ts ? MAX_HOURS_TS : until_today_ts ))
+
+# ---------- worktree setup ----------
+
+if [[ -z "$WORKTREE" ]]; then
+  REPO_NAME="$(basename "$REPO")"
+  WORKTREE="$(dirname "$REPO")/${REPO_NAME}-overnight-${DATE_TAG}"
+fi
+
+BRANCH="overnight/${DATE_TAG}"
+
+echo "==> repo:     $REPO"
+echo "==> worktree: $WORKTREE"
+echo "==> branch:   $BRANCH"
+echo "==> deadline: $(date -r "$DEADLINE_TS" 2>/dev/null || date -d "@$DEADLINE_TS")"
+echo "==> max iters: $MAX_ITERS"
+echo "==> mvp mode:  $MVP (stop after first feature)"
+[[ "$DRY_RUN" == "1" ]] && echo "==> DRY RUN: not running pi"
+
+if [[ ! -d "$WORKTREE" ]]; then
+  echo "==> creating worktree..."
+  if git -C "$REPO" rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
+    git -C "$REPO" worktree add "$WORKTREE" "$BRANCH"
+  else
+    git -C "$REPO" worktree add "$WORKTREE" -b "$BRANCH"
+  fi
+else
+  echo "==> reusing existing worktree at $WORKTREE"
+  # Derive branch from the existing worktree so messages/checklist match reality.
+  existing_branch=$(git -C "$WORKTREE" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  if [[ -n "$existing_branch" && "$existing_branch" != "HEAD" ]]; then
+    BRANCH="$existing_branch"
+    echo "==> resumed branch: $BRANCH"
+  fi
+fi
+
+# ---------- scaffold .overnight/ ----------
+
+OVR="$WORKTREE/.overnight"
+mkdir -p "$OVR"
+
+if [[ ! -f "$OVR/NIGHT_LOG.md" ]]; then
+  cat > "$OVR/NIGHT_LOG.md" <<EOF
+# Night Log — $DATE_TAG
+
+Repo: $REPO
+Branch: $BRANCH
+Started: $(date)
+Deadline: $(date -r "$DEADLINE_TS" 2>/dev/null || date -d "@$DEADLINE_TS")
+MVP mode: $MVP
+
+---
+EOF
+fi
+
+if [[ ! -f "$OVR/STATE.md" ]]; then
+  cat > "$OVR/STATE.md" <<EOF
+# Overnight State
+
+state: PLANNING
+feature: (none yet)
+iteration: 0
+last_hat: (none)
+next_hat: producer
+
+## Notes for next tick
+
+Cold start. Producer should inspect the repo and pick one shippable feature.
+EOF
+fi
+
+# ---------- clear stale stop/done sentinels ----------
+# When reusing an existing worktree, any leftover .overnight/DONE or .overnight/STOP
+# files from a previous run would kill this new run on tick 1. Starting a session
+# means the team is not "done" or "stopped" anymore — wipe these.
+for sentinel in "$OVR/DONE" "$OVR/STOP"; do
+  if [[ -f "$sentinel" ]]; then
+    echo "==> clearing stale sentinel from a previous run: $sentinel"
+    rm "$sentinel"
+  fi
+done
+
+# ---------- skill path ----------
+
+SKILL_PATH="$HOME/dotfiles/pi/skills/overnight-team/SKILL.md"
+if [[ ! -f "$SKILL_PATH" ]]; then
+  echo "error: skill not found at $SKILL_PATH" >&2
+  exit 1
+fi
+
+# ---------- the loop ----------
+
+cd "$WORKTREE"
+
+iter=0
+while true; do
+  iter=$(( iter + 1 ))
+  now_ts=$(date +%s)
+
+  # stop conditions
+  if [[ -f "$OVR/STOP" ]]; then
+    echo "==> STOP file detected. Exiting."
+    break
+  fi
+  if [[ -f "$OVR/DONE" ]]; then
+    if [[ "$MVP" == "1" ]]; then
+      echo "==> DONE file detected (MVP mode). Exiting."
+    else
+      echo "==> DONE file detected. Team has ended the night. Exiting."
+    fi
+    break
+  fi
+  if (( now_ts >= DEADLINE_TS )); then
+    echo "==> Deadline reached. Exiting."
+    break
+  fi
+  if (( iter > MAX_ITERS )); then
+    echo "==> Max iterations ($MAX_ITERS) reached. Exiting."
+    break
+  fi
+
+  remaining_s=$(( DEADLINE_TS - now_ts ))
+  remaining_min=$(( remaining_s / 60 ))
+
+  echo
+  echo "================================================================"
+  echo "tick $iter  |  $(date +%H:%M:%S)  |  ${remaining_min}m remaining"
+  echo "================================================================"
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "(dry run — would invoke pi here)"
+    sleep 1
+    continue
+  fi
+
+  # Determine current hat from STATE.md (default: producer on cold start)
+  NEXT_HAT="producer"
+  if [[ -f "$OVR/STATE.md" ]]; then
+    parsed=$(awk -F': *' '/^next_hat:/ {print $2; exit}' "$OVR/STATE.md" | tr -d '[:space:]')
+    [[ -n "$parsed" && "$parsed" != "(none)" ]] && NEXT_HAT="$parsed"
+  fi
+
+  # Layered preferences: global general → project general → global hat → project hat
+  GLOBAL_PREFS="$HOME/.pi/overnight/preferences"
+  PROJECT_PREFS="$OVR/preferences"
+  PREFS_BLOCK=""
+  for spec in \
+      "$GLOBAL_PREFS/general.md|general (global)" \
+      "$PROJECT_PREFS/general.md|general (this project)" \
+      "$GLOBAL_PREFS/$NEXT_HAT.md|$NEXT_HAT (global)" \
+      "$PROJECT_PREFS/$NEXT_HAT.md|$NEXT_HAT (this project)"; do
+    file="${spec%%|*}"
+    label="${spec##*|}"
+    if [[ -s "$file" ]]; then
+      PREFS_BLOCK+=$'\n\n## '"$label"$'\n\n'"$(cat "$file")"
+    fi
+  done
+
+  # Append-system-prompt gives the agent live wrapper context + author preferences
+  APPEND="You are tick #$iter of the overnight loop. Wrapper deadline: $(date -r "$DEADLINE_TS" 2>/dev/null || date -d "@$DEADLINE_TS"). Approximately ${remaining_min} minutes remain. Working directory: $WORKTREE. Branch: $BRANCH. Current next_hat from STATE.md: $NEXT_HAT. Do exactly one step per the overnight-team skill, then exit."
+  if [[ -n "$PREFS_BLOCK" ]]; then
+    APPEND+=$'\n\n# AUTHOR PREFERENCES\n\nThese are the human author\'s stated tastes. Honor them when they do not conflict with the overnight-team skill\'s hard rules. They evolve over time — treat them as authoritative for this tick.'"$PREFS_BLOCK"
+  fi
+
+  # Invoke pi in print mode with the skill loaded.
+  # --no-session keeps each tick ephemeral (clean context every tick).
+  pi -p \
+    --skill "$SKILL_PATH" \
+    --no-session \
+    --append-system-prompt "$APPEND" \
+    "Take one step in the overnight workflow. Read .overnight/STATE.md first." \
+    || {
+      echo "==> pi invocation failed for tick $iter (exit code $?). Logging and continuing."
+      {
+        echo
+        echo "## $(date +%H:%M) — ⚠️ wrapper"
+        echo
+        echo "Tick $iter: pi invocation failed. Continuing to next tick."
+        echo
+        echo "→ next: (retry, state unchanged)"
+      } >> "$OVR/NIGHT_LOG.md"
+    }
+done
+
+# ---------- summary ----------
+
+echo
+echo "================================================================"
+echo "overnight session ended at $(date)"
+echo "iterations completed: $(( iter - 1 ))"
+echo "worktree: $WORKTREE"
+echo "================================================================"
+
+# List all shipped features (new format: shipped/NN-name.md), plus legacy SHIPPED.md if present.
+shipped_dir="$OVR/shipped"
+shipped_count=0
+if [[ -d "$shipped_dir" ]]; then
+  shipped_count=$(find "$shipped_dir" -maxdepth 1 -name '*.md' -type f 2>/dev/null | wc -l | tr -d ' ')
+fi
+legacy_shipped=""
+[[ -f "$OVR/SHIPPED.md" ]] && legacy_shipped="$OVR/SHIPPED.md"
+
+if (( shipped_count > 0 )) || [[ -n "$legacy_shipped" ]]; then
+  echo
+  echo "================================================================"
+  if (( shipped_count > 0 )); then
+    echo "🚀 SHIPPED THIS NIGHT — $shipped_count feature(s)"
+  else
+    echo "🚀 SHIPPED THIS NIGHT — 1 feature (legacy SHIPPED.md)"
+  fi
+  echo "================================================================"
+  if [[ -n "$legacy_shipped" ]]; then
+    cat "$legacy_shipped"
+    echo
+  fi
+  if (( shipped_count > 0 )); then
+    for f in "$shipped_dir"/*.md; do
+      [[ -f "$f" ]] || continue
+      cat "$f"
+      echo
+      echo "---"
+      echo
+    done
+  fi
+else
+  echo
+  echo "(no features shipped this night — check NIGHT_LOG.md for what the team got stuck on)"
+fi
+
+echo
+echo "morning checklist:"
+echo "  cat $OVR/NIGHT_LOG.md          # read the story"
+echo "  cat $OVR/CRITIQUE.md           # playtester's notes (if any)"
+echo "  cd $WORKTREE && git log $BRANCH --oneline"
+echo "  cd $WORKTREE && git diff main  # or whatever the base branch is"
+echo
+echo "to merge: git -C $REPO merge $BRANCH"
+echo "to trash: git -C $REPO worktree remove $WORKTREE && git -C $REPO branch -D $BRANCH"

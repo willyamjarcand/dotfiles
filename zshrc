@@ -41,12 +41,14 @@ _load_settings "$HOME/.zsh/configs"
 [[ -f ~/.aliases ]] && source ~/.aliases
 
 export PATH="$HOME/.bin:$PATH"
+export PATH="$HOME/bin:$PATH"
 
 [[ -x /opt/homebrew/bin/brew ]] && eval $(/opt/homebrew/bin/brew shellenv)
 
 c(){
   clear
 }
+
 
 tm() {
   if [ -n "$1" ]; then
@@ -59,12 +61,22 @@ tm() {
   fi
 }
 
+wt() {
+  local selected
+  selected=$(git worktree list | awk 'NR==1{root=$1} {
+    path = $1
+    n = split(path, parts, "/")
+    name = (path == root) ? "root" : parts[n]
+    print name "\t" path
+  }' | fzf --delimiter=$'\t' --with-nth=1 --preview 'git -C {2} log --oneline -10' | cut -f2)
+  [ -n "$selected" ] && cd "$selected"
+}
+
 # fuzzyfind default options
 export FZF_DEFAULT_OPTS="
   --bind 'ctrl-j:preview-down'
   --bind 'ctrl-k:preview-up'
 "
-
 
 # bun completions
 [ -s "/home/wilyuhm/.bun/_bun" ] && source "/home/wilyuhm/.bun/_bun"
@@ -78,10 +90,29 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 [ -f /opt/dev/dev.sh ] && source /opt/dev/dev.sh
 
 # Wealthsimple-specific configuration
-if hostname | grep -i Wealthsimple &>/dev/null; then
+if [[ -d ~/.config/wealthsimple ]]; then
   source ~/.config/wealthsimple/env.secrets
-  _load_settings "$HOME/.zsh/configs/wealthsimple"
+  [[ -f ~/.zsh/configs/wealthsimple.zsh ]] && source ~/.zsh/configs/wealthsimple.zsh
+
+  export AWS_REGION='us-east-1'
+  export FORT_KNOX_GRPC_VERSION="1.72.0"
+
+  export ANDROID_HOME="$HOME/Library/Android/sdk"
+  export PATH="$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools"
+  export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+  export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
+
+  export ZSH="$HOME/.oh-my-zsh"
+  plugins=(git)
+  [[ -f $ZSH/oh-my-zsh.sh ]] && source $ZSH/oh-my-zsh.sh
 fi
 
-
 eval "$(~/.local/bin/mise activate zsh)"
+
+# pnpm
+export PNPM_HOME="$HOME/Library/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME/bin:"*) ;;
+  *) export PATH="$PNPM_HOME/bin:$PATH" ;;
+esac
+# pnpm end

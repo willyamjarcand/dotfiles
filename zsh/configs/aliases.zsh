@@ -14,13 +14,10 @@ get_openai_api_key() {
 }
 
 ai() {
-    local api_key=$(get_openai_api_key)
-    if [ -z "$api_key" ]; then
-        echo "OpenAI API key not found in Keychain."
-        echo "To add it, run: security add-generic-password -a $USER -s openai_api_key -w"
-        return 1
-    fi
-    
-    OPENAI_API_BASE=https://llm.w10e.com/api \
-    aider --model openai/bedrock-claude-3.7-sonnet --api-key openai="$api_key"
+  local port=$(basename ~/.claude/ide/*.lock .lock 2>/dev/null)
+  if [[ -n "$port" ]]; then
+    CLAUDE_CODE_SSE_PORT="$port" ENABLE_IDE_INTEGRATION="true" FORCE_CODE_TERMINAL="true" claude "$@"
+  else
+    claude "$@"
+  fi
 }

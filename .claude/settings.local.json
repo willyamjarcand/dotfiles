@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:www.google.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "mcp__mcplocker__slack_list_channels",
+      "mcp__mcplocker__slack_search_messages"
     ],
     "deny": []
   }

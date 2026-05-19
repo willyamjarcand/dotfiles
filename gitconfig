@@ -1,6 +1,7 @@
 [include]
   path = ~/.gitconfig-default
-	path = /Users/willyamarcand/.config/dev/gitconfig
+[include]
+  path = ~/.config/wealthsimple/gitconfig
 [includeIf "gitdir:~/dotfiles/**"]
   path = ~/.gitconfig-personal
 [init]
@@ -15,6 +16,7 @@
   autocrlf = input
 [merge]
   ff = only
+  tool = nvimdiff
 [commit]
   template = ~/.gitmessage
 [fetch]
@@ -24,12 +26,12 @@
 [diff]
   colorMoved = zebra
 [user]
-	name = Willyam Arcand
-	email = willyam.arcand@gmail.com
+  name = Willyam Arcand
 [alias]
   st = status
   ci = commit
   br = branch
   co = checkout
-[maintenance]
-	repo = /Users/willyamarcand/world/trees/root/src
+  g = git
+[url "ssh://git@github.com/"]
+  insteadOf = https://github.com/
