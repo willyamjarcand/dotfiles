@@ -1,64 +1,59 @@
 #!/bin/bash
+set -euo pipefail
+
+IS_CONTAINER=false
+[ -f /.dockerenv ] && IS_CONTAINER=true
 
 # Install required packages
-sudo apt update
-sudo apt install curl neovim fzf rcm silversearcher-ag -y
+sudo apt-get update -q
+sudo apt-get install -y curl git fzf rcm silversearcher-ag ack zsh
 
-sudo apt-get install fuse libfuse2 git python3-pip ack-grep -y
-
-pip3 install --user powerline-status
-sudo apt install -y fonts-powerline
-
-sudo apt-get install neofetch
-
-# install starship
-curl -sS https://starship.rs/install.sh | sh
-
-# install neovim
-$HOME/dotfiles/machine/spin/install_neovim.sh
-
-# Font installation script
-FONT_DIR="$HOME/.fonts"
-DOTFILES_FONT_DIR="$HOME/dotfiles/fonts"
-
-# Create the font directory if it doesn't exist
-mkdir -p "$FONT_DIR"
-
-# Copy the font files to the font directory
-sudo cp -a "$DOTFILES_FONT_DIR"/. "$FONT_DIR"
-
-# Update the font cache
-fc-cache -f -v
-
-# Install ZSH
-sudo apt install -y git-core zsh curl
-sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
-
-# Install plug-ins (you can git-pull to update them later).
-(cd $HOME/.oh-my-zsh/custom/plugins && git clone https://github.com/zsh-users/zsh-syntax-highlighting)
-(cd $HOME/.oh-my-zsh/custom/plugins && git clone https://github.com/zsh-users/zsh-autosuggestions)
-
-# Install theme
-sudo cp $HOME/dotfiles/zsh/themes/pixegami-agnoster.zsh-theme $HOME/.oh-my-zsh/themes/pixegami-agnoster.zsh-theme
-
-# Dracula
-ln -s $HOME/dotfiles/zsh/themes/dracula/dracula.zsh-theme $HOME/.oh-my-zsh/themes/dracula.zsh-theme
-
-dconf load /org/gnome/terminal/legacy/profiles:/:fb358fc9-49ea-4252-ad34-1d25c649e633/ <./ubuntu/terminal_profile.dconf
-
-# Add it to the default list in the terminal
-add_list_id=fb358fc9-49ea-4252-ad34-1d25c649e633
-old_list=$(dconf read /org/gnome/terminal/legacy/profiles:/list | tr -d "]")
-
-if [ -z "$old_list" ]; then
-  front_list="["
-else
-  front_list="$old_list, "
+if [ "$IS_CONTAINER" = false ]; then
+  sudo apt-get install -y fuse libfuse2 fonts-powerline neofetch
+  pip3 install --user powerline-status
 fi
 
-new_list="$front_list'$add_list_id']"
-dconf write /org/gnome/terminal/legacy/profiles:/list "$new_list"
-dconf write /org/gnome/terminal/legacy/profiles:/default "'$add_list_id'"
+# Starship
+if ! command -v starship &>/dev/null; then
+  curl -sS https://starship.rs/install.sh | sh -s -- --yes
+fi
 
-# Run defaults.sh script from dotfiles
-bash ~/dotfiles/machine/ubuntu/defaults.sh
+# Fonts (skip in container — no display server)
+if [ "$IS_CONTAINER" = false ]; then
+  FONT_DIR="$HOME/.fonts"
+  mkdir -p "$FONT_DIR"
+  sudo cp -a "$HOME/dotfiles/fonts/." "$FONT_DIR"
+  fc-cache -f -v
+fi
+
+# Oh My Zsh
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+  RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
+fi
+
+# Plugins
+[ ! -d "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" ] && \
+  git clone https://github.com/zsh-users/zsh-syntax-highlighting "$HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting"
+
+[ ! -d "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" ] && \
+  git clone https://github.com/zsh-users/zsh-autosuggestions "$HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
+
+# Themes
+cp "$HOME/dotfiles/zsh/themes/pixegami-agnoster.zsh-theme" "$HOME/.oh-my-zsh/themes/"
+[ ! -L "$HOME/.oh-my-zsh/themes/dracula.zsh-theme" ] && \
+  ln -s "$HOME/dotfiles/zsh/themes/dracula/dracula.zsh-theme" "$HOME/.oh-my-zsh/themes/dracula.zsh-theme"
+
+# GNOME terminal profile (desktop only)
+if [ "$IS_CONTAINER" = false ] && command -v dconf &>/dev/null; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  dconf load /org/gnome/terminal/legacy/profiles:/:fb358fc9-49ea-4252-ad34-1d25c649e633/ <"$SCRIPT_DIR/ubuntu/terminal_profile.dconf"
+
+  add_list_id=fb358fc9-49ea-4252-ad34-1d25c649e633
+  old_list=$(dconf read /org/gnome/terminal/legacy/profiles:/list | tr -d "]")
+  front_list=$( [ -z "$old_list" ] && echo "[" || echo "$old_list, " )
+  dconf write /org/gnome/terminal/legacy/profiles:/list "${front_list}'${add_list_id}']"
+  dconf write /org/gnome/terminal/legacy/profiles:/default "'${add_list_id}'"
+fi
+
+# Dotfiles symlinks via rcm
+env RCRC="$HOME/dotfiles/rcrc" rcup -f
