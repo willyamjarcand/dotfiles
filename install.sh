@@ -26,6 +26,9 @@ else
 fi
 
 # Neofetch config
-cp $HOME/dotfiles/zsh/configs/neofetch/neofetch.conf $HOME/.config/neofetch/config.conf
+if [ -f "$HOME/dotfiles/zsh/configs/neofetch/neofetch.conf" ]; then
+  mkdir -p "$HOME/.config/neofetch"
+  cp "$HOME/dotfiles/zsh/configs/neofetch/neofetch.conf" "$HOME/.config/neofetch/config.conf"
+fi
 
 env RCRC=$HOME/dotfiles/rcrc rcup -f
