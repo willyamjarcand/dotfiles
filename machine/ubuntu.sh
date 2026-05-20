@@ -29,8 +29,7 @@ fi
 
 # Oh My Zsh
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
-  RUNZSH=no CHSH=no REMOTE=https://github.com/ohmyzsh/ohmyzsh.git \
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+  git clone https://github.com/ohmyzsh/ohmyzsh.git "$HOME/.oh-my-zsh"
 fi
 
 # Plugins
