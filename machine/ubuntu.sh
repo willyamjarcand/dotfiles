@@ -15,7 +15,8 @@ fi
 
 # Starship
 if ! command -v starship &>/dev/null; then
-  curl -sS https://starship.rs/install.sh | sh -s -- --yes
+  mkdir -p "$HOME/.local/bin"
+  curl -sS https://starship.rs/install.sh | sh -s -- --yes --bin-dir "$HOME/.local/bin"
 fi
 
 # Fonts (skip in container — no display server)
