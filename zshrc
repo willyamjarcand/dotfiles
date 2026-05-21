@@ -1,8 +1,3 @@
-# load custom executable functions
-#for function in ~/.zsh/functions/*; do
-#  source $function
-#done
-
 # extra files in ~/.zsh/configs/pre , ~/.zsh/configs , and ~/.zsh/configs/post
 # these are loaded first, second, and third, respectively.
 _load_settings() {
@@ -45,41 +40,8 @@ export PATH="$HOME/bin:$PATH"
 
 [[ -x /opt/homebrew/bin/brew ]] && eval $(/opt/homebrew/bin/brew shellenv)
 
-c(){
-  clear
-}
-
-
-tm() {
-  if [ -n "$1" ]; then
-    tmux new-session -A -s "$1"
-  else
-    session=$(tmux list-sessions -F "#{session_name}" | fzf)
-    if [ -n "$session" ]; then
-      tmux attach-session -t "$session"
-    fi
-  fi
-}
-
-wt() {
-  local selected
-  selected=$(git worktree list | awk 'NR==1{root=$1} {
-    path = $1
-    n = split(path, parts, "/")
-    name = (path == root) ? "root" : parts[n]
-    print name "\t" path
-  }' | fzf --delimiter=$'\t' --with-nth=1 --preview 'git -C {2} log --oneline -10' | cut -f2)
-  [ -n "$selected" ] && cd "$selected"
-}
-
-# fuzzyfind default options
-export FZF_DEFAULT_OPTS="
-  --bind 'ctrl-j:preview-down'
-  --bind 'ctrl-k:preview-up'
-"
-
 # bun completions
-[ -s "/home/wilyuhm/.bun/_bun" ] && source "/home/wilyuhm/.bun/_bun"
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
 # bun
 export BUN_INSTALL="$HOME/.bun"
@@ -102,12 +64,14 @@ if [[ -d ~/.config/wealthsimple ]]; then
   export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
   export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
 
-  export ZSH="$HOME/.oh-my-zsh"
-  plugins=(git)
-  [[ -f $ZSH/oh-my-zsh.sh ]] && source $ZSH/oh-my-zsh.sh
 fi
 
-eval "$(~/.local/bin/mise activate zsh)"
+_mise=$(command -v mise 2>/dev/null || echo "$HOME/.local/bin/mise")
+[[ -x "$_mise" ]] && eval "$($_mise activate zsh)"
+unset _mise
+eval "$(zoxide init zsh)"
+
+export XDG_CONFIG_HOME="$HOME/.config"
 
 # pnpm
 export PNPM_HOME="$HOME/Library/pnpm"
@@ -116,3 +80,5 @@ case ":$PATH:" in
   *) export PATH="$PNPM_HOME/bin:$PATH" ;;
 esac
 # pnpm end
+
+eval "$(direnv hook zsh)"
