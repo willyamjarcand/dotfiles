@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd "$(dirname "$0")"
+
 os=$(uname -s)
 
 if [ $SPIN ]; then

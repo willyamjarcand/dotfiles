@@ -6,7 +6,14 @@ IS_CONTAINER=false
 
 # Install required packages
 sudo apt-get update -q
-sudo apt-get install -y curl git fzf rcm silversearcher-ag ack zsh
+sudo apt-get install -y curl git fzf rcm silversearcher-ag ack zsh \
+  zoxide direnv bat ripgrep tmux git-delta lazygit
+
+# bat ships as batcat on Ubuntu — provide a consistent alias
+if command -v batcat &>/dev/null && ! command -v bat &>/dev/null; then
+  mkdir -p "$HOME/.local/bin"
+  ln -sf "$(command -v batcat)" "$HOME/.local/bin/bat"
+fi
 
 if [ "$IS_CONTAINER" = false ]; then
   sudo apt-get install -y fuse libfuse2 fonts-powerline neofetch

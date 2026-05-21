@@ -59,26 +59,30 @@ if [[ -d ~/.config/wealthsimple ]]; then
   export AWS_REGION='us-east-1'
   export FORT_KNOX_GRPC_VERSION="1.72.0"
 
-  export ANDROID_HOME="$HOME/Library/Android/sdk"
-  export PATH="$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools"
-  export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
-  export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
+  if [[ "$OSTYPE" == darwin* ]]; then
+    export ANDROID_HOME="$HOME/Library/Android/sdk"
+    export PATH="$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/tools:$ANDROID_HOME/tools/bin:$ANDROID_HOME/platform-tools"
+    export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+    export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
+  fi
 
 fi
 
 _mise=$(command -v mise 2>/dev/null || echo "$HOME/.local/bin/mise")
 [[ -x "$_mise" ]] && eval "$($_mise activate zsh)"
 unset _mise
-eval "$(zoxide init zsh)"
+command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
 
 export XDG_CONFIG_HOME="$HOME/.config"
 
 # pnpm
-export PNPM_HOME="$HOME/Library/pnpm"
-case ":$PATH:" in
-  *":$PNPM_HOME/bin:"*) ;;
-  *) export PATH="$PNPM_HOME/bin:$PATH" ;;
-esac
+if [[ "$OSTYPE" == darwin* ]]; then
+  export PNPM_HOME="$HOME/Library/pnpm"
+  case ":$PATH:" in
+    *":$PNPM_HOME/bin:"*) ;;
+    *) export PATH="$PNPM_HOME/bin:$PATH" ;;
+  esac
+fi
 # pnpm end
 
-eval "$(direnv hook zsh)"
+command -v direnv &>/dev/null && eval "$(direnv hook zsh)"
