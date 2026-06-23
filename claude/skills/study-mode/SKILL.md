@@ -24,6 +24,7 @@ In any of these cases, exit and answer normally.
 
 The response IS, in order:
 
+0. (Silent to user) Grounding — read canonical sources before teaching
 1. A 2-question diagnostic
 2. Two paired worked examples, surface-different, structurally identical
 3. An alignment prompt asked TO the user (not asserted)
@@ -49,9 +50,43 @@ Every turn opens with one line:
 study-mode · <topic> · <phase> · due: <count>
 ```
 
-This externalizes state. The user never has to remember which phase they are in or how many recall questions are pending.
+After grounding, the status block also reports what was read:
+
+```
+study-mode · paxos · diagnostic · read: Lamport "Paxos Made Simple" + en.wikipedia.org/wiki/Paxos · due: 0
+```
+
+This externalizes state. The user never has to remember which phase they are in, what sources you grounded in, or how many recall questions are pending.
 
 ## Protocol
+
+### [0] Grounding — silent to the user, before any teaching
+
+Before the diagnostic, **read the canonical source(s) for the topic in full.** Worked examples built on training-data recall hallucinate confidently; worked examples built on canonical sources do not. This phase is the difference between teaching the user a real protocol and teaching them a plausible-sounding wrong one.
+
+Classify the topic and pull sources:
+
+| Topic type | Required reading | Optional supplements |
+|---|---|---|
+| External tool / library / framework | Official docs (the page describing the feature) via WebFetch | Source code of the tool; popular OSS implementations |
+| Algorithm / protocol / theorem with a canonical paper | The paper, or a high-quality summary if paywalled; Wikipedia for cross-check | A reference implementation in a known repo |
+| Language feature / standard library | Official language docs for that feature | Common Stack Overflow questions; the language spec |
+| Codebase-specific concept ("how does *our* X work") | The relevant files in the current repo via Read + Bash grep | Project README, ADRs, commit history of the relevant files |
+| Universally unambiguous (for loops, basic arithmetic) | SKIP — proceed to [1] | — |
+
+**Rules:**
+
+1. **Read in full, not summary.** A 2-page docs page is not "too much." Token cost is acceptable; accurate teaching is the deliverable.
+2. **Two sources beat one** when the topic has a canonical paper + popular reference (e.g., Lamport + Wikipedia). Cross-checking catches misremembered details.
+3. **Optional supplements are nice-to-have.** Pull them when the docs alone would force you to invent the "in practice" feel — a real OSS implementation grounds the worked example in real syntax and real failure modes. Skip when the docs already answer the user's likely confusions.
+4. **Skip cases.** Skip grounding if (a) the topic is universally unambiguous from the table above, (b) the user said "skip the research", "I don't want you looking things up", "no internet", or (c) no canonical source exists.
+
+**What the user sees during [0]:**
+
+The user does NOT see a dump of the docs you read. They see the status block updated with the sources, and possibly the tool calls themselves if your runtime shows them. Surface a one-line acknowledgment of what you grounded in, then proceed directly to [1].
+
+✗ Wrong: dumping a summary of the docs as the first response
+✓ Right: status block updated with sources, then the diagnostic questions
 
 ### [1] Diagnostic
 
@@ -205,6 +240,10 @@ Hard rules. Violating any of them defeats the skill.
 | "I'll put the drill answer in the same response so they can self-check" | Recognition substitutes for production. Wait for their answer in the next turn. |
 | "The status block is noise; the user can see the conversation" | Externalized state is load-bearing for ADHD adults (Canela 2022). One line. Always. |
 | "This concept is genuinely too simple for paired examples" | If it is, the user did not need study-mode. Exit per "When NOT to use." |
+| "I already know this concept; grounding is unnecessary" | Your training data has decay and gaps. The user is here because they want accurate teaching, not confident recall. Ground anyway. |
+| "Fetching the docs will take too long" | A WebFetch is ~5-15 seconds. The worked example will live in the user's head for months. Pay the seconds. |
+| "I can summarize the docs from memory" | This is the exact failure mode the grounding phase prevents. If you find yourself thinking this, ground. |
+| "The docs are paywalled / I can't access them" | Pull the next-best canonical source: Wikipedia, a well-cited summary, or a reference implementation. Document the substitution in the status block. |
 
 ## Red flags — STOP
 
@@ -223,6 +262,8 @@ If you catch any of these in your draft, delete and restart:
 - A user message ending with "I get it" or "thanks" followed by your response that does not run the transfer check
 - A response with no status block at the top
 - A response with one worked example instead of two
+- Worked examples that you produced without reading the canonical source first (unless the topic was on the "skip" list)
+- Dumping a summary of the docs you just read as the first response — the user sees the diagnostic, not the source material
 
 ## Journal
 
