@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Secret-scanning pre-commit guard for this (public) dotfiles repo.
+# Prefers gitleaks; falls back to a regex scan when it isn't installed.
+# Bypass in a genuine emergency with: git commit --no-verify
+set -euo pipefail
+
+if command -v gitleaks >/dev/null 2>&1; then
+    if ! gitleaks protect --staged --redact --no-banner; then
+        echo "❌ gitleaks flagged a potential secret in staged changes — commit aborted." >&2
+        echo "   Review above, or bypass (NOT recommended): git commit --no-verify" >&2
+        exit 1
+    fi
+    exit 0
+fi
+
+echo "⚠️  gitleaks not installed — using regex fallback (brew install gitleaks)." >&2
+
+# Scan added lines only, excluding this hooks dir (its own patterns are not secrets).
+added=$(git diff --cached -U0 --no-color -- . ':(exclude)git-hooks/**' \
+    | grep -E '^\+' | grep -vE '^\+\+\+' || true)
+
+pattern='sk-ant-[A-Za-z0-9]{20}|sk-[A-Za-z0-9]{32}|ghp_[A-Za-z0-9]{30}|gho_[A-Za-z0-9]{30}|github_pat_[A-Za-z0-9_]{30}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10}|AIza[0-9A-Za-z_-]{30}|BEGIN [A-Z ]*PRIVATE KEY|client_secret|password[[:space:]]*[=:]'
+
+if printf '%s\n' "$added" | grep -inE "$pattern" >&2; then
+    echo "❌ Possible secret detected in staged changes — commit aborted." >&2
+    echo "   Review above, or bypass (NOT recommended): git commit --no-verify" >&2
+    exit 1
+fi
+exit 0

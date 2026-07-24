@@ -1,10 +1,6 @@
 #!/bin/bash
 
-if [ -e "$HOME"/.local/share/nvim/site/autoload/plug.vim ]; then
-  nvim -E -s +PlugUpgrade +qa
-else
-  curl -fLo "$HOME"/.local/share/nvim/site/autoload/plug.vim --create-dirs \
-      https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
-fi
+nvim --headless "+Lazy! sync" +qa
 
-nvim -u "$HOME"/.config/nvim/lua/bundles.lua +PlugUpdate +PlugClean! +TSInstall +TSUpdate +qa
+# Wire the versioned git hooks (secret-scanning pre-commit) for this repo
+git -C "$HOME/dotfiles" config core.hooksPath git-hooks
