@@ -12,6 +12,7 @@ agent_panel_scope = "all"
 
 [keys]
 prefix = "ctrl+a"
-previous_workspace = "ctrl+k"
-next_workspace = "ctrl+j"
+previous_workspace = ""
+next_workspace = ""
+zoom = "z"
 
