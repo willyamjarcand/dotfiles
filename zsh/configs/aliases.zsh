@@ -1,5 +1,30 @@
 bindkey '^K' kill-whole-line
 
+alias c='clear'
+alias herd='herdr'
+
+tm() {
+  if [ -n "$1" ]; then
+    tmux new-session -A -s "$1"
+  else
+    session=$(tmux list-sessions -F "#{session_name}" | fzf)
+    if [ -n "$session" ]; then
+      tmux attach-session -t "$session"
+    fi
+  fi
+}
+
+wt() {
+  local selected
+  selected=$(git worktree list | awk 'NR==1{root=$1} {
+    path = $1
+    n = split(path, parts, "/")
+    name = (path == root) ? "root" : parts[n]
+    print name "\t" path
+  }' | fzf --delimiter=$'\t' --with-nth=1 --preview 'git -C {2} log --oneline -10' | cut -f2)
+  [ -n "$selected" ] && cd "$selected"
+}
+
 # Neovim socket functions
 start_nvim() {
     CURRENT_DIR=$(basename "$PWD")

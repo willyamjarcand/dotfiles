@@ -86,3 +86,4 @@ fi
 # pnpm end
 
 command -v direnv &>/dev/null && eval "$(direnv hook zsh)"
+export PATH="/opt/homebrew/opt/ruby@3.3/bin:$PATH"
