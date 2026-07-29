@@ -31,6 +31,9 @@ brew "git-delta"
 brew "zoxide"
 brew "lazygit"
 brew "gitleaks"
+brew "jiratui"
+brew "crit"
+brew "gh"
 cask "iterm2"
 cask "rectangle"
 cask "bartender"
@@ -49,6 +52,17 @@ brew tap homebrew/cask-fonts
 brew install --cask font-powerline-symbols
 
 brew cleanup
+
+# gh-dash (GitHub dashboard) — a gh CLI extension, not a formula
+if command -v gh &>/dev/null && ! gh extension list 2>/dev/null | grep -q 'dlvhdr/gh-dash'; then
+  gh extension install dlvhdr/gh-dash
+fi
+
+# crit: install its Claude Code integration as a user-scoped plugin
+if command -v claude &>/dev/null; then
+  claude plugin marketplace add tomasz-tomczyk/crit 2>/dev/null || true
+  claude plugin install crit@crit 2>/dev/null || true
+fi
 
 sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
 

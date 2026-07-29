@@ -63,5 +63,32 @@ if [ "$IS_CONTAINER" = false ] && command -v dconf &>/dev/null; then
   dconf write /org/gnome/terminal/legacy/profiles:/default "'${add_list_id}'"
 fi
 
+# jiratui (Textual UI for Jira) — not packaged in apt
+if ! command -v jiratui &>/dev/null; then
+  if command -v uv &>/dev/null; then
+    uv tool install jiratui
+  elif command -v pipx &>/dev/null; then
+    pipx install jiratui
+  else
+    pip3 install --user jiratui
+  fi
+fi
+
+# crit (local agent-output review tool) — not in apt; install via go if available
+if ! command -v crit &>/dev/null && command -v go &>/dev/null; then
+  go install github.com/tomasz-tomczyk/crit/cmd/crit@latest
+fi
+
+# gh-dash (GitHub dashboard) — a gh CLI extension
+if command -v gh &>/dev/null && ! gh extension list 2>/dev/null | grep -q 'dlvhdr/gh-dash'; then
+  gh extension install dlvhdr/gh-dash
+fi
+
+# crit: install its Claude Code integration as a user-scoped plugin
+if command -v claude &>/dev/null; then
+  claude plugin marketplace add tomasz-tomczyk/crit 2>/dev/null || true
+  claude plugin install crit@crit 2>/dev/null || true
+fi
+
 # Dotfiles symlinks via rcm
 env RCRC="$HOME/dotfiles/rcrc" rcup -f

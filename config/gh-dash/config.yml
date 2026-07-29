@@ -1,0 +1,39 @@
+# gh-dash — GitHub PR/issue dashboard (https://gh-dash.dev). `gh dash` to launch.
+# Auth comes from the gh CLI; no secrets live here, so this is safe to commit.
+prSections:
+  - title: My Pull Requests
+    filters: is:open author:@me
+  - title: Needs My Review
+    filters: is:open review-requested:@me
+  - title: Involved
+    filters: is:open involves:@me -author:@me -review-requested:@me
+  - title: Recently Merged (mine)
+    filters: is:merged author:@me
+    limit: 20
+
+issuesSections:
+  - title: My Issues
+    filters: is:open author:@me
+  - title: Assigned to Me
+    filters: is:open assignee:@me
+
+defaults:
+  preview:
+    open: true
+    width: 60
+  prsLimit: 20
+  issuesLimit: 20
+  refetchIntervalMinutes: 30
+
+keybindings:
+  prs: []
+  issues: []
+
+repoPaths: {}
+
+theme:
+  ui:
+    sectionsShowCount: true
+
+pager:
+  diff: delta

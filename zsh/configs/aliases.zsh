@@ -46,3 +46,13 @@ ai() {
     claude "$@"
   fi
 }
+
+# jiratui: generate the config from env on first use, then launch the UI.
+jira() {
+  local cfg="${XDG_CONFIG_HOME:-$HOME/.config}/jiratui/config.yaml"
+  [[ -f "$cfg" ]] || jiratui-config || return 1
+  jiratui ui "$@"
+}
+
+# gh-dash: GitHub PR/issue dashboard
+alias ghd='gh dash'
