@@ -87,3 +87,8 @@ fi
 
 command -v direnv &>/dev/null && eval "$(direnv hook zsh)"
 export PATH="/opt/homebrew/opt/ruby@3.3/bin:$PATH"
+
+# crew shell completion
+_crew_completions="$HOME/.worktrees/crew/config-file/completions/crew.zsh"
+[[ -f "$_crew_completions" ]] && source "$_crew_completions"
+unset _crew_completions
