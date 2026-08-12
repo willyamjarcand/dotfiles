@@ -1,0 +1,58 @@
+#!/bin/sh
+# Open a new Ghostty tab running a command, via Ghostty's AppleScript dictionary
+# (1.3+, macOS only). Ghostty has no IPC on macOS -- `ghostty +new-window` is
+# Linux-only -- so AppleScript is the only way to script a tab.
+#
+#   ghostty-tab [-d <dir>] <command> [args...]
+#
+# The command runs under `bash --noprofile --norc` with `exec -l` prepended by
+# Ghostty, which means:
+#   - absolute paths only; nothing from your zshrc is on PATH
+#   - no shell operators (&& || ; |) -- only the first command would survive
+#
+#   ghostty-tab /opt/homebrew/bin/tmux new-session -A -s scratch
+#   ghostty-tab -d ~/src/foo /opt/homebrew/bin/tmux attach -t crew-foo-bar
+
+set -eu
+
+dir=""
+if [ "${1:-}" = "-d" ]; then
+  [ $# -ge 2 ] || { echo "ghostty-tab: -d needs a directory" >&2; exit 1; }
+  dir="$2"
+  shift 2
+fi
+
+[ $# -ge 1 ] || {
+  sed -n '2,/^$/s/^# \{0,1\}//p' "$0" >&2
+  exit 1
+}
+
+# Quote each argument for the pane's bash, then escape the whole string for the
+# AppleScript literal it gets embedded in.
+cmd=""
+for a in "$@"; do
+  q=$(printf '%s' "$a" | sed "s/'/'\\\\''/g")
+  cmd="$cmd '$q'"
+done
+esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+script="tell application \"Ghostty\"
+  set cfg to new surface configuration
+  set command of cfg to \"$(esc "${cmd# }")\""
+[ -n "$dir" ] && script="$script
+  set initial working directory of cfg to \"$(esc "$dir")\""
+script="$script
+  new tab with configuration cfg
+end tell"
+
+# Ghostty creates the tab but can't marshal the `tab` object it returns, so it
+# reports -1708 on success. Anything else is a real failure.
+out=$(printf '%s' "$script" | osascript 2>&1) || {
+  case "$out" in
+  *"Can’t continue new tab"* | *"Can't continue new tab"*) exit 0 ;;
+  *)
+    printf 'ghostty-tab: %s\n' "$out" >&2
+    exit 1
+    ;;
+  esac
+}

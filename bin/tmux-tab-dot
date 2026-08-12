@@ -1,0 +1,26 @@
+#!/bin/sh
+# Assign a colored dot to a tmux session, exposed as the @tab_dot session
+# option and prefixed onto the terminal title. macOS native tabs can only be
+# tinted by the focused surface, so an inactive Ghostty tab can't carry a
+# background color -- the dot in the title text is what makes it findable.
+#
+# The dot sticks for the life of the session, and is picked from whatever is
+# unused by the other live sessions so concurrent tabs never share a color.
+
+set -eu
+
+session=${1:-$(tmux display-message -p '#S')}
+
+[ -n "$(tmux show-options -qv -t "$session" @tab_dot)" ] && exit 0
+
+used=$(tmux list-sessions -F '#{@tab_dot}' 2>/dev/null || true)
+
+for dot in 🔴 🟠 🟡 🟢 🔵 🟣 🟤 ⚪ 🟥 🟧 🟨 🟩 🟦 🟪 🟫 ⬜; do
+  case $used in
+    *"$dot"*) ;;
+    *) tmux set-option -t "$session" @tab_dot "$dot"; exit 0 ;;
+  esac
+done
+
+# more sessions than colors: fall back to the first
+tmux set-option -t "$session" @tab_dot 🔴
