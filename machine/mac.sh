@@ -83,3 +83,6 @@ cp fonts/Hack/* ~/Library/Fonts/
 
 # Setup expected defaults
 $HOME/dotfiles/machine/mac/defaults.sh
+
+# Memory sampler LaunchAgent
+$HOME/dotfiles/machine/mac/memwatch.sh

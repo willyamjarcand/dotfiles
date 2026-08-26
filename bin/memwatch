@@ -1,0 +1,290 @@
+#!/usr/bin/python3
+"""memwatch -- sample macOS memory usage and attribute it to process buckets.
+
+  memwatch sample     append one JSON line to today's log (run by launchd every 60s)
+  memwatch snapshot   dump a full per-process listing right now
+  memwatch report     aggregate the logs into a per-bucket table
+
+Buckets are for *ranking*, not accounting: `ps` RSS double-counts shared pages,
+so bucket sums exceed real usage. The `used_mb`/`app_mb` fields from vm_stat are
+the ground truth -- app_mb + wired_mb + compressed_mb is what Activity Monitor
+calls "Memory Used".
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timedelta
+
+STATE = os.path.expanduser("~/.local/state/memwatch")
+RETAIN_DAYS = 14
+SNAPSHOT_COOLDOWN = 300
+
+# Fire a snapshot when memory is genuinely tight. Overridable for testing.
+FREE_MB_FLOOR = int(os.environ.get("MEMWATCH_FREE_MB_FLOOR", 4096))
+SWAP_MB_CEIL = int(os.environ.get("MEMWATCH_SWAP_MB_CEIL", 1024))
+COMPRESSED_MB_CEIL = int(os.environ.get("MEMWATCH_COMPRESSED_MB_CEIL", 8192))
+
+# First match wins, so order matters: narrow patterns before their catch-alls.
+# Apple daemons are matched early because names like `biomed`, `swcd` and
+# `com.apple.dt.*` otherwise get mistaken for the dev tools below.
+BUCKETS = [
+    ("claude",        r"(?:^|/)claude(?:\s|$)|claude-code"),
+    ("spotlight",     r"(?:^|/)mds|mdworker|Spotlight|mediaanalysisd|photoanalysisd|photolibraryd|corespotlight"),
+    ("apple-system",  r"^/System/|^/usr/libexec/|^/usr/sbin/|^/usr/bin/(?:login|periodic)|^/Library/Apple|^/Library/PrivilegedHelperTools/com\.apple"),
+    ("metro",         r"metro|react-native|expo-|@expo/|watchman"),
+    ("node-lsp",      r"tsserver|typescript-language-server|vtsls|(?:^|/)tsgo|(?:^|/)eslint|(?:^|/)biome(?:\s|$)|(?:^|/)prettier"),
+    ("node-test",     r"(?:^|/)jest|(?:^|/)vitest|playwright|puppeteer|(?:^|/)mocha|(?:^|/)karma"),
+    ("node-build",    r"webpack|(?:^|/)vite(?:\s|$)|esbuild|rollup|(?:^|/)turbo|babel|(?:^|/)next(?:\s|$)|(?:^|/)swc(?:\s|$)"),
+    ("node-other",    r"(?:^|/)(?:node|bun|deno|npm|pnpm|yarn)(?:\s|$)"),
+    ("ruby",          r"(?:^|/)ruby(?:\s|$)|(?:^|/)puma|sidekiq|(?:^|/)rspec|(?:^|/)rails|(?:^|/)bundle(?:\s|$)|(?:^|/)spring(?:\s|$)|ruby-lsp|solargraph"),
+    ("android",       r"(?:^|/)emulator|qemu-system|(?:^|/)adb(?:\s|$)|android-studio"),
+    ("jvm",           r"(?:^|/)java(?:\s|$)|(?:^|/)gradle|kotlin|JetBrains"),
+    ("xcode",         r"Xcode|SourceKit|sourcekit|swift-frontend|XCBBuildService|CoreSimulator|Simulator\.app|(?:^|/)simctl|(?:^|/)clangd|xcodebuild"),
+    ("docker",        r"(?:^|/|\.)docker|colima|containerd|(?:^|/)qemu|(?:^|/)lima"),
+    ("db",            r"(?:^|/)postgres|redis-server|memcached|elasticsearch|opensearch|mysqld|clickhouse"),
+    ("chrome",        r"Google Chrome"),
+    ("browser-other", r"Safari|firefox|Arc\.app|Brave|WebKit"),
+    ("electron",      r"Slack|Discord|Notion|Spotify|Figma|Electron|Visual Studio Code|Code Helper|Cursor|Obsidian"),
+    ("ghostty",       r"[Gg]hostty|iTerm|Terminal\.app|WezTerm"),
+    ("tmux",          r"(?:^|/)tmux"),
+    ("editor",        r"(?:^|/)n?vim(?:\s|$)|lua-language-server|(?:^|/)gopls|rust-analyzer|(?:^|/)pyright|(?:^|/)helix"),
+    ("cli-tools",     r"(?:^|/)(?:git|rg|fd|fzf|grep|find|tar|zsh|bash|sh)(?:\s|$)"),
+]
+BUCKETS = [(name, re.compile(pat)) for name, pat in BUCKETS]
+
+
+def run(*cmd):
+    return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+
+
+def vm_stats():
+    """Page counts from vm_stat, converted to MB where it makes sense."""
+    out = run("/usr/bin/vm_stat")
+    page = int(re.search(r"page size of (\d+)", out).group(1))
+    pages = {}
+    for line in out.splitlines()[1:]:
+        if ":" not in line:
+            continue
+        key, _, val = line.partition(":")
+        val = val.strip().rstrip(".")
+        if val.isdigit():
+            pages[key.strip().strip('"')] = int(val)
+
+    def mb(*keys):
+        return round(sum(pages.get(k, 0) for k in keys) * page / 1048576)
+
+    total_mb = round(int(run("/usr/sbin/sysctl", "-n", "hw.memsize").strip()) / 1048576)
+    free_mb = mb("Pages free", "Pages speculative")
+    app_mb = mb("Anonymous pages") - mb("Pages purgeable")
+    return {
+        "total_mb": total_mb,
+        "free_mb": free_mb,
+        "used_mb": total_mb - free_mb,
+        "app_mb": app_mb,
+        "wired_mb": mb("Pages wired down"),
+        "compressed_mb": mb("Pages occupied by compressor"),
+        "cached_mb": mb("File-backed pages"),
+        "swapins": pages.get("Swapins", 0),
+        "swapouts": pages.get("Swapouts", 0),
+    }
+
+
+def swap_usage():
+    out = run("/usr/sbin/sysctl", "-n", "vm.swapusage")
+    nums = dict(re.findall(r"(total|used|free)\s*=\s*([\d.]+)M", out))
+    return {
+        "swap_total_mb": round(float(nums.get("total", 0))),
+        "swap_used_mb": round(float(nums.get("used", 0))),
+    }
+
+
+def processes():
+    """(rss_mb, pid, command) for every process, largest first."""
+    out = run("/bin/ps", "-Ao", "rss=,pid=,command=")
+    procs = []
+    for line in out.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 3:
+            continue
+        rss, pid, cmd = parts
+        try:
+            procs.append((int(rss) / 1024.0, int(pid), cmd))
+        except ValueError:
+            continue
+    procs.sort(reverse=True)
+    return procs
+
+
+def bucket_of(cmd):
+    for name, pat in BUCKETS:
+        if pat.search(cmd):
+            return name
+    return "other"
+
+
+def collect():
+    stats = vm_stats()
+    stats.update(swap_usage())
+    procs = processes()
+
+    buckets = {}
+    for rss_mb, _pid, cmd in procs:
+        b = buckets.setdefault(bucket_of(cmd), {"n": 0, "mb": 0.0, "top": []})
+        b["n"] += 1
+        b["mb"] += rss_mb
+        if len(b["top"]) < 3:
+            b["top"].append("%d MB %s" % (round(rss_mb), cmd[:100]))
+    for b in buckets.values():
+        b["mb"] = round(b["mb"])
+
+    return {
+        "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+        **stats,
+        "nproc": len(procs),
+        "load": os.getloadavg()[0],
+        "rss_total_mb": round(sum(p[0] for p in procs)),
+        "buckets": dict(sorted(buckets.items(), key=lambda kv: -kv[1]["mb"])),
+        "top": [{"pid": p, "mb": round(r), "cmd": c[:120]} for r, p, c in procs[:10]],
+    }
+
+
+def under_pressure(rec):
+    return (
+        rec["free_mb"] < FREE_MB_FLOOR
+        or rec["swap_used_mb"] > SWAP_MB_CEIL
+        or rec["compressed_mb"] > COMPRESSED_MB_CEIL
+    )
+
+
+def write_snapshot(rec, reason):
+    """Full per-process dump, for reading after the fact."""
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    path = os.path.join(STATE, "pressure-%s.txt" % stamp)
+    with open(path, "w") as f:
+        f.write("# memwatch snapshot %s (%s)\n\n" % (rec["ts"], reason))
+        f.write(json.dumps({k: v for k, v in rec.items() if k != "top"}, indent=2))
+        f.write("\n\n== vm_stat ==\n" + run("/usr/bin/vm_stat"))
+        f.write("\n== ps (rss desc) ==\n")
+        for rss_mb, pid, cmd in processes():
+            if rss_mb < 20:
+                break
+            f.write("%8.0f MB  %-7d %s\n" % (rss_mb, pid, cmd[:200]))
+    return path
+
+
+def prune():
+    cutoff = time.time() - RETAIN_DAYS * 86400
+    for name in os.listdir(STATE):
+        path = os.path.join(STATE, name)
+        if name.endswith((".jsonl", ".txt")) and os.path.getmtime(path) < cutoff:
+            os.remove(path)
+
+
+def cmd_sample():
+    os.makedirs(STATE, exist_ok=True)
+    rec = collect()
+    log = os.path.join(STATE, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+    with open(log, "a") as f:
+        f.write(json.dumps(rec) + "\n")
+
+    marker = os.path.join(STATE, ".last-snapshot")
+    if under_pressure(rec):
+        last = os.path.getmtime(marker) if os.path.exists(marker) else 0
+        if time.time() - last > SNAPSHOT_COOLDOWN:
+            write_snapshot(rec, "auto: free=%dMB swap=%dMB compressed=%dMB"
+                           % (rec["free_mb"], rec["swap_used_mb"], rec["compressed_mb"]))
+            open(marker, "w").close()
+    prune()
+
+
+def cmd_snapshot():
+    os.makedirs(STATE, exist_ok=True)
+    print(write_snapshot(collect(), "manual"))
+
+
+def load_records(days):
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    recs = []
+    if not os.path.isdir(STATE):
+        return recs
+    for name in sorted(os.listdir(STATE)):
+        if name.endswith(".jsonl") and name[:10] >= cutoff:
+            with open(os.path.join(STATE, name)) as f:
+                for line in f:
+                    try:
+                        recs.append(json.loads(line))
+                    except ValueError:
+                        continue
+    return recs
+
+
+def cmd_report(days=7):
+    recs = load_records(days)
+    if not recs:
+        print("no samples in %s (last %dd)" % (STATE, days))
+        return
+
+    def pct(vals, p):
+        vals = sorted(vals)
+        return vals[min(len(vals) - 1, int(len(vals) * p))]
+
+    print("%d samples, %s .. %s\n" % (len(recs), recs[0]["ts"], recs[-1]["ts"]))
+
+    am = [r["app_mb"] + r["wired_mb"] + r["compressed_mb"] for r in recs]
+    print("== system (MB) ==")
+    print("%-16s %8s %8s %8s" % ("", "median", "p95", "peak"))
+    for label, vals in [
+        ("memory used", am),
+        ("compressed", [r["compressed_mb"] for r in recs]),
+        ("swap used", [r["swap_used_mb"] for r in recs]),
+        ("free", [r["free_mb"] for r in recs]),
+    ]:
+        print("%-16s %8d %8d %8d" % (label, pct(vals, 0.5), pct(vals, 0.95), max(vals)))
+    print("total RAM %d MB\n" % recs[0]["total_mb"])
+
+    names = set()
+    for r in recs:
+        names.update(r["buckets"])
+    rows = []
+    for name in names:
+        series = [r["buckets"].get(name, {"mb": 0, "n": 0}) for r in recs]
+        mbs = [s["mb"] for s in series]
+        rows.append((max(mbs), name, pct(mbs, 0.5), pct(mbs, 0.95), max(s["n"] for s in series)))
+    rows.sort(reverse=True)
+
+    print("== per-bucket RSS (MB; shared pages double-counted) ==")
+    print("%-16s %8s %8s %8s %6s" % ("bucket", "median", "p95", "peak", "maxN"))
+    for peak, name, p50, p95, n in rows:
+        print("%-16s %8d %8d %8d %6d" % (name, p50, p95, peak, n))
+
+    snaps = sorted(f for f in os.listdir(STATE) if f.startswith("pressure-"))
+    print("\n== pressure snapshots (%d) ==" % len(snaps))
+    for s in snaps[-10:]:
+        print("  %s/%s" % (STATE, s))
+
+    worst = max(recs, key=lambda r: r["app_mb"] + r["wired_mb"] + r["compressed_mb"])
+    print("\n== top processes at peak (%s) ==" % worst["ts"])
+    for p in worst["top"]:
+        print("%8d MB  %s" % (p["mb"], p["cmd"]))
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "report"
+    if cmd == "sample":
+        cmd_sample()
+    elif cmd == "snapshot":
+        cmd_snapshot()
+    elif cmd == "report":
+        days = int(sys.argv[2]) if len(sys.argv) > 2 else 7
+        cmd_report(days)
+    else:
+        print(__doc__.strip(), file=sys.stderr)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()
