@@ -5,10 +5,14 @@
   memwatch snapshot   dump a full per-process listing right now
   memwatch report     aggregate the logs into a per-bucket table
 
-Buckets are for *ranking*, not accounting: `ps` RSS double-counts shared pages,
-so bucket sums exceed real usage. The `used_mb`/`app_mb` fields from vm_stat are
-the ground truth -- app_mb + wired_mb + compressed_mb is what Activity Monitor
-calls "Memory Used".
+Per-process numbers are phys_footprint (dirty + compressed pages), the metric
+Activity Monitor's Memory column and the jetsam killer both use. RSS is NOT
+usable here: it excludes compressed pages, so a process whose pages have been
+squeezed into the compressor reads as small while still owning the memory.
+Bucket sums can still exceed physical RAM because shared memory is attributed
+to every process mapping it, so treat buckets as a ranking. The vm_stat fields
+are the system-wide ground truth -- app_mb + wired_mb + compressed_mb is what
+Activity Monitor calls "Memory Used".
 """
 
 import json
@@ -57,6 +61,15 @@ BUCKETS = [
 BUCKETS = [(name, re.compile(pat)) for name, pat in BUCKETS]
 
 
+UNITS = {"B": 1 / 1048576.0, "K": 1 / 1024.0, "M": 1.0, "G": 1024.0, "T": 1048576.0}
+
+
+def parse_size(text):
+    """top's MEM column -- '34G', '3502M', '56K+' -- as MB."""
+    m = re.match(r"([\d.]+)([BKMGT])", text.rstrip("+-"))
+    return float(m.group(1)) * UNITS[m.group(2)] if m else 0.0
+
+
 def run(*cmd):
     return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
 
@@ -103,20 +116,44 @@ def swap_usage():
 
 
 def processes():
-    """(rss_mb, pid, command) for every process, largest first."""
-    out = run("/bin/ps", "-Ao", "rss=,pid=,command=")
+    """(footprint_mb, pid, command) for every process, largest first.
+
+    `top -o mem` reports phys_footprint for every process and needs no root;
+    `footprint -a` would too but requires it. top truncates COMMAND to ~15
+    chars, which collapses every `node` into one indistinguishable name, so the
+    full argv comes from `ps` and is joined on pid.
+    """
+    argv = {}
+    for line in run("/bin/ps", "-Ao", "pid=,command=").splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        if pid.isdigit():
+            argv[int(pid)] = cmd.strip()
+
+    out = run("/usr/bin/top", "-l1", "-o", "mem", "-n", "99999",
+              "-stats", "pid,mem,command")
     procs = []
+    in_table = False
     for line in out.splitlines():
+        if line.startswith("PID"):
+            in_table = True
+            continue
         parts = line.split(None, 2)
-        if len(parts) < 3:
+        if not in_table or len(parts) < 3 or not parts[0].isdigit():
             continue
-        rss, pid, cmd = parts
-        try:
-            procs.append((int(rss) / 1024.0, int(pid), cmd))
-        except ValueError:
-            continue
+        pid = int(parts[0])
+        procs.append((parse_size(parts[1]), pid, argv.get(pid, parts[2].strip())))
     procs.sort(reverse=True)
     return procs
+
+
+def peak_footprint_mb(pid):
+    """Lifetime high-water mark, which top does not expose. ~0.4s per call."""
+    try:
+        out = run("/usr/bin/footprint", "-p", str(pid))
+    except subprocess.CalledProcessError:
+        return None
+    m = re.search(r"phys_footprint_peak:\s*([\d.]+)\s*([KMGT]?)B", out)
+    return round(float(m.group(1)) * UNITS[m.group(2) or "B"]) if m else None
 
 
 def bucket_of(cmd):
@@ -132,12 +169,12 @@ def collect():
     procs = processes()
 
     buckets = {}
-    for rss_mb, _pid, cmd in procs:
+    for fp_mb, _pid, cmd in procs:
         b = buckets.setdefault(bucket_of(cmd), {"n": 0, "mb": 0.0, "top": []})
         b["n"] += 1
-        b["mb"] += rss_mb
+        b["mb"] += fp_mb
         if len(b["top"]) < 3:
-            b["top"].append("%d MB %s" % (round(rss_mb), cmd[:100]))
+            b["top"].append("%d MB %s" % (round(fp_mb), cmd[:100]))
     for b in buckets.values():
         b["mb"] = round(b["mb"])
 
@@ -146,9 +183,13 @@ def collect():
         **stats,
         "nproc": len(procs),
         "load": os.getloadavg()[0],
-        "rss_total_mb": round(sum(p[0] for p in procs)),
+        "footprint_total_mb": round(sum(p[0] for p in procs)),
         "buckets": dict(sorted(buckets.items(), key=lambda kv: -kv[1]["mb"])),
-        "top": [{"pid": p, "mb": round(r), "cmd": c[:120]} for r, p, c in procs[:10]],
+        "top": [
+            dict(pid=p, mb=round(r), cmd=c[:120],
+                 **({"peak_mb": peak_footprint_mb(p)} if i < 3 else {}))
+            for i, (r, p, c) in enumerate(procs[:10])
+        ],
     }
 
 
@@ -168,11 +209,13 @@ def write_snapshot(rec, reason):
         f.write("# memwatch snapshot %s (%s)\n\n" % (rec["ts"], reason))
         f.write(json.dumps({k: v for k, v in rec.items() if k != "top"}, indent=2))
         f.write("\n\n== vm_stat ==\n" + run("/usr/bin/vm_stat"))
-        f.write("\n== ps (rss desc) ==\n")
-        for rss_mb, pid, cmd in processes():
-            if rss_mb < 20:
+        f.write("\n== processes (phys_footprint desc) ==\n")
+        for fp_mb, pid, cmd in processes():
+            if fp_mb < 20:
                 break
-            f.write("%8.0f MB  %-7d %s\n" % (rss_mb, pid, cmd[:200]))
+            peak = peak_footprint_mb(pid) if fp_mb > 2048 else None
+            f.write("%8.0f MB  %-7d %s%s\n" % (
+                fp_mb, pid, "peak %d MB  " % peak if peak else "", cmd[:200]))
     return path
 
 
@@ -256,7 +299,7 @@ def cmd_report(days=7):
         rows.append((max(mbs), name, pct(mbs, 0.5), pct(mbs, 0.95), max(s["n"] for s in series)))
     rows.sort(reverse=True)
 
-    print("== per-bucket RSS (MB; shared pages double-counted) ==")
+    print("== per-bucket phys_footprint (MB; shared memory counted per-mapper) ==")
     print("%-16s %8s %8s %8s %6s" % ("bucket", "median", "p95", "peak", "maxN"))
     for peak, name, p50, p95, n in rows:
         print("%-16s %8d %8d %8d %6d" % (name, p50, p95, peak, n))
