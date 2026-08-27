@@ -32,6 +32,12 @@ FREE_MB_FLOOR = int(os.environ.get("MEMWATCH_FREE_MB_FLOOR", 4096))
 SWAP_MB_CEIL = int(os.environ.get("MEMWATCH_SWAP_MB_CEIL", 1024))
 COMPRESSED_MB_CEIL = int(os.environ.get("MEMWATCH_COMPRESSED_MB_CEIL", 8192))
 
+# Any single process past this gets its memory broken down by category, which is
+# what turns "something leaked 76GB" into "it was IOSurface" or "it was the JS
+# heap". Re-captured every HOG_COOLDOWN so a leak leaves a growth curve.
+HOG_MB = int(os.environ.get("MEMWATCH_HOG_MB", 6144))
+HOG_COOLDOWN = 1800
+
 # First match wins, so order matters: narrow patterns before their catch-alls.
 # Apple daemons are matched early because names like `biomed`, `swcd` and
 # `com.apple.dt.*` otherwise get mistaken for the dev tools below.
@@ -164,6 +170,7 @@ def bucket_of(cmd):
 
 
 def collect():
+    """(record, procs) -- procs returned so callers avoid a second top+ps."""
     stats = vm_stats()
     stats.update(swap_usage())
     procs = processes()
@@ -178,7 +185,7 @@ def collect():
     for b in buckets.values():
         b["mb"] = round(b["mb"])
 
-    return {
+    rec = {
         "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
         **stats,
         "nproc": len(procs),
@@ -191,6 +198,7 @@ def collect():
             for i, (r, p, c) in enumerate(procs[:10])
         ],
     }
+    return rec, procs
 
 
 def under_pressure(rec):
@@ -201,7 +209,38 @@ def under_pressure(rec):
     )
 
 
-def write_snapshot(rec, reason):
+def capture_hog(fp_mb, pid, cmd):
+    """Per-category breakdown for one process. Both tools work without root."""
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    path = os.path.join(STATE, "hog-%d-%s.txt" % (pid, stamp))
+    with open(path, "w") as f:
+        f.write("# pid %d  footprint %.0f MB\n# %s\n\n" % (pid, fp_mb, cmd))
+        for label, argv in (
+            ("footprint --swapped", ("/usr/bin/footprint", "-p", str(pid), "--swapped")),
+            ("vmmap -summary", ("/usr/bin/vmmap", "-summary", str(pid))),
+        ):
+            f.write("== %s ==\n" % label)
+            try:
+                f.write(run(*argv))
+            except subprocess.CalledProcessError as exc:
+                f.write("(failed: %s)\n" % exc)
+            f.write("\n")
+    return path
+
+
+def capture_hogs(procs):
+    """Capture every process over HOG_MB, one capture per pid per cooldown."""
+    for fp_mb, pid, cmd in procs:
+        if fp_mb < HOG_MB:
+            break
+        marker = os.path.join(STATE, ".hog-%d" % pid)
+        last = os.path.getmtime(marker) if os.path.exists(marker) else 0
+        if time.time() - last > HOG_COOLDOWN:
+            capture_hog(fp_mb, pid, cmd)
+            open(marker, "w").close()
+
+
+def write_snapshot(rec, reason, procs):
     """Full per-process dump, for reading after the fact."""
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
     path = os.path.join(STATE, "pressure-%s.txt" % stamp)
@@ -210,7 +249,7 @@ def write_snapshot(rec, reason):
         f.write(json.dumps({k: v for k, v in rec.items() if k != "top"}, indent=2))
         f.write("\n\n== vm_stat ==\n" + run("/usr/bin/vm_stat"))
         f.write("\n== processes (phys_footprint desc) ==\n")
-        for fp_mb, pid, cmd in processes():
+        for fp_mb, pid, cmd in procs:
             if fp_mb < 20:
                 break
             peak = peak_footprint_mb(pid) if fp_mb > 2048 else None
@@ -225,11 +264,13 @@ def prune():
         path = os.path.join(STATE, name)
         if name.endswith((".jsonl", ".txt")) and os.path.getmtime(path) < cutoff:
             os.remove(path)
+        elif name.startswith(".hog-") and os.path.getmtime(path) < time.time() - 86400:
+            os.remove(path)
 
 
 def cmd_sample():
     os.makedirs(STATE, exist_ok=True)
-    rec = collect()
+    rec, procs = collect()
     log = os.path.join(STATE, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
     with open(log, "a") as f:
         f.write(json.dumps(rec) + "\n")
@@ -239,14 +280,17 @@ def cmd_sample():
         last = os.path.getmtime(marker) if os.path.exists(marker) else 0
         if time.time() - last > SNAPSHOT_COOLDOWN:
             write_snapshot(rec, "auto: free=%dMB swap=%dMB compressed=%dMB"
-                           % (rec["free_mb"], rec["swap_used_mb"], rec["compressed_mb"]))
+                           % (rec["free_mb"], rec["swap_used_mb"], rec["compressed_mb"]),
+                           procs)
             open(marker, "w").close()
+    capture_hogs(procs)
     prune()
 
 
 def cmd_snapshot():
     os.makedirs(STATE, exist_ok=True)
-    print(write_snapshot(collect(), "manual"))
+    rec, procs = collect()
+    print(write_snapshot(rec, "manual", procs))
 
 
 def load_records(days):
@@ -308,6 +352,12 @@ def cmd_report(days=7):
     print("\n== pressure snapshots (%d) ==" % len(snaps))
     for s in snaps[-10:]:
         print("  %s/%s" % (STATE, s))
+
+    hogs = sorted(f for f in os.listdir(STATE) if f.startswith("hog-"))
+    if hogs:
+        print("\n== per-process category captures (%d) ==" % len(hogs))
+        for h in hogs[-10:]:
+            print("  %s/%s" % (STATE, h))
 
     worst = max(recs, key=lambda r: r["app_mb"] + r["wired_mb"] + r["compressed_mb"])
     print("\n== top processes at peak (%s) ==" % worst["ts"])

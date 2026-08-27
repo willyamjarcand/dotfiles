@@ -86,3 +86,6 @@ $HOME/dotfiles/machine/mac/defaults.sh
 
 # Memory sampler LaunchAgent
 $HOME/dotfiles/machine/mac/memwatch.sh
+
+# Keep Spotlight out of worktrees/build dirs
+$HOME/dotfiles/machine/mac/spotlight-excludes.sh
