@@ -1,0 +1,46 @@
+#!/bin/sh
+# Assign a short, distinguishing label to a tmux session, exposed as the
+# @tab_label session option and used as the terminal title (see tmux.conf).
+#
+# crew sessions are named crew-<repo>-<workspace>, so every tab in the same
+# repo shares a long prefix and Ghostty truncates the tab title before reaching
+# anything that tells them apart. The repo/workspace boundary can't be found in
+# the string -- repo names contain hyphens -- so the workspace name comes from
+# the worktree directory instead, which also survives branch switches.
+#
+# A leading Jira key moves to the end: DBE-1267/DBE-1287/DBE-1294 differ only in
+# their last digits, which is the worst possible thing to truncate toward.
+
+set -eu
+
+session=${1:-$(tmux display-message -p '#S')}
+
+label=""
+
+case $session in
+  crew-*)
+    pane_path=$(tmux list-panes -t "$session" -F '#{pane_current_path}' 2>/dev/null | head -1)
+    if [ -n "$pane_path" ]; then
+      root=$(git -C "$pane_path" rev-parse --show-toplevel 2>/dev/null || true)
+      [ -n "$root" ] && label=$(basename "$root")
+    fi
+    ;;
+esac
+
+# Ticket to the back: DBE-1267-ayp-settings -> ayp-settings DBE-1267
+case $label in
+  [A-Z][A-Z]*-[0-9]*-*)
+    key=${label%%-*}
+    rest=${label#*-}
+    num=${rest%%-*}
+    words=${rest#*-}
+    case $num in
+      *[!0-9]*) ;;
+      *) label="$words $key-$num" ;;
+    esac
+    ;;
+esac
+
+[ -n "$label" ] || label=$session
+
+tmux set-option -t "$session" @tab_label "$label"

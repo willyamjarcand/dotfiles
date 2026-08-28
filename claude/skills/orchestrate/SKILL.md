@@ -142,7 +142,7 @@ Each tab self-colors from the `client-attached` hook. Read the assignments back 
 print the roster so the user can find a tab by its dot:
 
 ```bash
-tmux list-sessions -F '#{@tab_dot}  #{session_name}' | grep -F "$NAME"
+tmux list-sessions -F '#{@tab_dot}  #{?@tab_label,#{@tab_label},#{session_name}}' | grep -F "$NAME"
 ```
 
 Report: dot, workspace, ticket, effort, plan path. Then **stop** — don't poll.
