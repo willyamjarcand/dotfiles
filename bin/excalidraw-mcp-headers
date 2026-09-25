@@ -1,0 +1,10 @@
+#!/bin/bash
+# Claude Code headersHelper for the Excalidraw+ MCP server.
+# Reads the API key from the macOS Keychain; store it with:
+#   security add-generic-password -a "$USER" -s excalidraw_plus_api_key -w
+key=$(security find-generic-password -a "$USER" -s "excalidraw_plus_api_key" -w 2>/dev/null)
+if [[ -z "$key" ]]; then
+  echo "excalidraw_plus_api_key not found in Keychain" >&2
+  exit 1
+fi
+printf '{"Authorization": "Bearer %s"}\n' "$key"
