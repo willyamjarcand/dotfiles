@@ -64,6 +64,25 @@ Drop a `name.ts` file into `extensions/` — pi loads it via [jiti](https://gith
 
 Run `/reload` inside pi to pick up changes without restarting.
 
+## Personal display preferences (Wally)
+
+Two extensions keep the transcript closer to Claude Code:
+
+- `extensions/code-blocks.ts` — syntax-highlighted code with a compact language label and dim gutter, instead of literal Markdown fences. Uses your current theme and preserves native Markdown parsing, including nested blocks and streaming responses.
+- `extensions/quiet-tools.ts` — hides routine `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls` rows. Reading a `SKILL.md` shows only `Skill · <name>`. Plugin/MCP/subagent tools and failures remain visible.
+
+**Ctrl+O** (the native `app.tools.expand` shortcut) reveals full tool calls/results, including hidden file reads and diffs. Press it again to return to the quiet view. These are display-only changes: tools still run normally, and session history, model context, print/RPC output, and exports are unchanged. Agent prose and thinking visibility are not changed.
+
+The existing `extensions` path above loads both automatically after `/reload`. To disable either, add an exact exclusion to the `extensions` array in `~/.pi/agent/settings.json`, then reload, for example `"-~/dotfiles/pi/extensions/quiet-tools.ts"`.
+
+These extensions wrap renderer methods in memory because there is no dedicated code-block layout or tool-row visibility hook. They restore the original methods on shutdown/reload; no installed Wally files are patched. They rely on internal component state and were tested with **Wally 0.87.1-ws.8**, so re-run the regression tests after upgrading:
+
+```bash
+node --test pi/tests/*.test.mjs
+```
+
+The tests use the renderer from `wally` on your `$PATH`; they do not invoke a model or access your saved sessions.
+
 ## Slash commands provided here
 
 | Command | Source | What |
