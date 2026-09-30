@@ -2,8 +2,15 @@
 
 ### General UI
 
-# Save screenshots to the downloads folder
-defaults write com.apple.screencapture location -string "${HOME}/Downloads"
+# Save screenshots to ~/Screenshots.
+#
+# NOT ~/Desktop and NOT ~/Downloads: both are TCC-protected ("Files and Folders"),
+# so a terminal-based agent can only read them when the terminal app happens to
+# hold a grant — which is per-app and gets dropped on app updates/resets. A plain
+# directory under $HOME is not TCC-gated, so agents can always read it with no
+# prompt and no Full Disk Access.
+mkdir -p "${HOME}/Screenshots"
+defaults write com.apple.screencapture location -string "${HOME}/Screenshots"
 
 # Bottom left hot corner starts screen saver
 defaults write com.apple.dock wvous-bl-corner -int 5

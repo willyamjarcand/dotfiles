@@ -68,3 +68,33 @@ The machine setup also installs crit's Claude Code integration as a user-scoped 
 which adds the `/crit` review-loop skill. Note `crit install <agent>` is *project*-scoped
 (writes `./.claude/skills/`); the plugin above is global, which is why it lives in the
 setup scripts rather than the repo.
+
+## Screenshots
+
+Screenshots save to `~/Screenshots`, set in `machine/mac/defaults.sh`.
+
+They deliberately do **not** go to `~/Desktop` or `~/Downloads`. macOS guards
+Desktop, Documents, Downloads, iCloud Drive, and external volumes behind
+privacy (TCC) prompts, and grants are per-app — so a coding agent can only read
+them while the terminal app happens to hold one, which silently disappears on
+app updates. A plain directory under `$HOME` is not guarded at all, so an agent
+reads it with no prompt and without Full Disk Access.
+
+After changing the location, restart the UI so it takes effect:
+
+```sh
+killall SystemUIServer
+```
+
+`bin/shot` prints the path to a recent screenshot, which is handy because macOS
+put a U+202F narrow no-break space before AM/PM in every filename:
+
+```sh
+shot            # newest -> /Users/you/Screenshots/Screenshot ….png
+shot 2          # second newest
+shot --copy     # path to the clipboard
+read "$(shot)"  # hand it to an agent
+```
+
+It also looks in `~/Desktop` and `~/Downloads`, so screenshots taken before the
+preference was set still resolve.

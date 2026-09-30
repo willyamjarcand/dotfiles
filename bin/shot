@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Print the path to a recent screenshot, so it can be handed to an agent.
+#
+# macOS names screenshots with a U+202F (narrow no-break space) before AM/PM,
+# which makes them awkward to type and to glob in a shell. This resolves the
+# newest match without you copying the name.
+#
+#   read "$(shot)"      # or in pi/wally: @<TAB> then paste, or just:
+#   shot                # -> /Users/you/Screenshots/Screenshot ... .png
+#   shot 2              # second newest
+#   shot --copy         # put the path on the clipboard
+#
+# Falls back to ~/Desktop and ~/Downloads for screenshots taken before the
+# location preference was set.
+set -euo pipefail
+
+dir="${SCREENSHOT_DIR:-$HOME/Screenshots}"
+index=1
+copy=0
+
+while (($#)); do
+  case "$1" in
+    --copy|-c) copy=1 ;;
+    --dir) dir="$2"; shift ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    ''|*[!0-9]*) printf 'shot: unrecognised argument %s\n' "$1" >&2; exit 1 ;;
+    *) index="$1" ;;
+  esac
+  shift
+done
+
+# Newest first across the new location and the legacy fallbacks.
+shopt -s nullglob
+candidates=()
+for d in "$dir" "$HOME/Desktop" "$HOME/Downloads"; do
+  [[ -d "$d" ]] || continue
+  for f in "$d"/Screenshot*.png "$d"/Screen\ Shot*.png; do
+    candidates+=("$f")
+  done
+done
+
+if ((${#candidates[@]} == 0)); then
+  printf 'shot: no screenshots found in %s (or Desktop/Downloads)\n' "$dir" >&2
+  exit 1
+fi
+
+# Sort by mtime, newest first. stat -f is the BSD (macOS) form.
+newest=$(for f in "${candidates[@]}"; do
+  printf '%s\t%s\n' "$(stat -f '%m' "$f")" "$f"
+done | sort -rn | cut -f2-)
+
+target=$(printf '%s\n' "$newest" | sed -n "${index}p")
+if [[ -z "$target" ]]; then
+  printf 'shot: no screenshot at index %s (found %s)\n' "$index" "${#candidates[@]}" >&2
+  exit 1
+fi
+
+if ((copy)); then
+  printf '%s' "$target" | pbcopy
+  printf 'shot: copied path to clipboard\n' >&2
+fi
+
+printf '%s\n' "$target"
