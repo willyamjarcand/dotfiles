@@ -86,15 +86,10 @@ After changing the location, restart the UI so it takes effect:
 killall SystemUIServer
 ```
 
-`bin/shot` prints the path to a recent screenshot, which is handy because macOS
-put a U+202F narrow no-break space before AM/PM in every filename:
+Note: macOS writes a U+202F narrow no-break space before AM/PM in screenshot
+filenames, so typing one of those names by hand won't match. Use shell
+tab-completion or a wildcard instead:
 
 ```sh
-shot            # newest -> /Users/you/Screenshots/Screenshot ….png
-shot 2          # second newest
-shot --copy     # path to the clipboard
-read "$(shot)"  # hand it to an agent
+read ~/Screenshots/Screenshot*4.16.13*.png
 ```
-
-It also looks in `~/Desktop` and `~/Downloads`, so screenshots taken before the
-preference was set still resolve.
