@@ -93,3 +93,28 @@ tab-completion or a wildcard instead:
 ```sh
 read ~/Screenshots/Screenshot*4.16.13*.png
 ```
+
+## Excalidraw MCP in Wally/pi
+
+Pi has no built-in MCP support, so Wally reaches the Excalidraw+ MCP server through
+[`pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter). The server config is
+committed at `config/mcp/mcp.json` (linked to `~/.config/mcp/mcp.json` by `rcup`).
+
+The API key is never in the repo or the environment: the config runs
+`security find-generic-password … -w` when the server connects. Store the key once:
+
+```sh
+security add-generic-password -a "$USER" -s excalidraw_plus_api_key -w
+```
+
+The adapter itself is a Pi package, recorded in the untracked `~/.pi/agent/settings.json`,
+so a new machine needs:
+
+```sh
+wally install npm:pi-mcp-adapter@2.37.0
+```
+
+`allowInstall: false` stops the agent adding new MCP servers by URL. `approveTools`
+asks before tools that delete, remove users, change workspace settings, or create
+invites; everything else (listing, reading, creating and editing scenes) runs freely.
+Claude Code uses the same key via `bin/excalidraw-mcp-headers`.
