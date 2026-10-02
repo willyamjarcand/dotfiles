@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "excalidraw": {
+      "url": "https://api.excalidraw.com/api/v1/mcp",
+      "headers": {
+        "Authorization": "!echo Bearer $(security find-generic-password -a \"$USER\" -s excalidraw_plus_api_key -w)"
+      },
+      "toolExposure": {
+        "delete_*": "hidden",
+        "remove_*": "hidden",
+        "update_workspace*": "hidden",
+        "create_email_invite": "hidden",
+        "create_invite_link": "hidden",
+        "update_invite": "hidden"
+      }
+    }
+  }
+}

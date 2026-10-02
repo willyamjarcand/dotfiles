@@ -96,25 +96,22 @@ read ~/Screenshots/Screenshot*4.16.13*.png
 
 ## Excalidraw MCP in Wally/pi
 
-Pi has no built-in MCP support, so Wally reaches the Excalidraw+ MCP server through
-[`pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter). The server config is
-committed at `config/mcp/mcp.json` (linked to `~/.config/mcp/mcp.json` by `rcup`).
+Wally (0.99+) connects to the Excalidraw+ MCP server with pi's built-in MCP support. The
+config is committed at `pi/mcp.json`. `pi/` is excluded from `rcup`, so link it once:
 
-The API key is never in the repo or the environment: the config runs
-`security find-generic-password … -w` when the server connects. Store the key once:
+```sh
+ln -s ~/dotfiles/pi/mcp.json ~/.pi/agent/mcp.json
+```
+
+The API key is never in the repo or the environment: the `Authorization` header is a
+`!command` that runs `security find-generic-password … -w` when Wally connects. Store the
+key once:
 
 ```sh
 security add-generic-password -a "$USER" -s excalidraw_plus_api_key -w
 ```
 
-The adapter itself is a Pi package, recorded in the untracked `~/.pi/agent/settings.json`,
-so a new machine needs:
-
-```sh
-wally install npm:pi-mcp-adapter@2.37.0
-```
-
-`allowInstall: false` stops the agent adding new MCP servers by URL. `approveTools`
-asks before tools that delete, remove users, change workspace settings, or create
-invites; everything else (listing, reading, creating and editing scenes) runs freely.
-Claude Code uses the same key via `bin/excalidraw-mcp-headers`.
+The tools that delete, remove users, change workspace settings, or create invites are
+`hidden` via `toolExposure`, so the agent cannot call them; do those in Excalidraw itself.
+Everything else (listing, reading, creating and editing scenes) works. Check the connection
+with `wally mcp list`. Claude Code uses the same key via `bin/excalidraw-mcp-headers`.
